@@ -18,6 +18,37 @@ fetches only the tiles the view touches:
 
 ![The same scene zoomed in to full resolution](docs/img/hobart-3031-zoom.png)
 
+## Sentinel-2 on a web map
+
+`www/s2.html` browses Sentinel-2 L2A: a STAC search of the map view
+(Earth Search, `sentinel-2-l2a`, dates and a cloud limit), footprints and a
+scene list, and the chosen scene drawn from its raw uint16 band COGs. Each
+of three bands is warped by `wxy-warp` onto the map's own Web Mercator
+pixel grid (the part of the view the scene covers) whenever the map stops
+moving; the page then turns them into colour: reflectance from the STAC
+`raster:bands` scale (the offset is skipped when
+`earthsearch:boa_offset_applied` says it is already removed), a black and
+white point, and gamma. The sliders repaint without warping again. Band
+sets: true colour, false colour, SWIR and agriculture; the 20 m bands are
+warped onto the same grid as the 10 m ones.
+
+![Hobart at 10 m: B4, B3 and B2 warped from UTM 55S to the map grid at full
+resolution](docs/img/s2-hobart.jpg)
+
+Hobart at full resolution, 3 bands warped from UTM 55S to the map grid.
+Zoomed out, the whole scene comes from the coarsest overviews (5 range
+requests per band, 1.8 MB for all three):
+
+![The whole scene, true colour, with STAC footprints](docs/img/s2-scene.jpg)
+
+In these screenshots the basemap tiles and the STAC response were stubbed
+(the build machine cannot reach them; the STAC items are the real ones from
+the `sentinel-cogs` bucket). The band reads and warps are live.
+
+Not yet: one scene at a time (no mosaic), the warp runs on the page's
+thread, and each full-resolution view fetches whole 1024 by 1024 tiles
+(about 1.5 MB each per band), so zooming in on a slow link is slow.
+
 ## What is in it
 
 - `src/fetch.rs`: an async-tiff reader over the browser's `fetch` with
@@ -39,7 +70,7 @@ fetches only the tiles the view touches:
   // out.requests, out.bytes
   ```
 
-- `www/`: the page. Colouring is in JavaScript (percentile stretch; a
+- `www/index.html`: one COG, any projection. Colouring is in JavaScript (percentile stretch; a
   sea and land ramp when values straddle zero, viridis otherwise, RGB for
   three bands). While dragging it warps at half size with nearest
   neighbour, then once more at full size when the view settles.
@@ -61,7 +92,7 @@ is the planned route to full PROJ (design gate 4).
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --version 0.2.129   # the version in Cargo.lock
 scripts/build.sh                                   # -> www/pkg/
-python3 -m http.server -d www 8000                 # open http://localhost:8000/
+python3 -m http.server -d www 8000                 # open http://localhost:8000/ or /s2.html
 ```
 
 clang is needed for zstd's C code. `cargo test` runs the native tests; they
