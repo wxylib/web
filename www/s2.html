@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wxylib Sentinel-2</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --panel: #ffffff; --sel: #e8f0fe; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161618; --fg: #f2f2f2; --muted: #a1a1a6; --line: #3a3a3c; --panel: #1f1f22; --sel: #23324a; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--fg); display: flex; flex-direction: column;
+         font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); }
+  .app { flex: 1; display: flex; min-height: 0; }
+  aside { width: 300px; flex: none; overflow-y: auto; padding: 10px 12px; border-right: 1px solid var(--line); }
+  #map { flex: 1; min-height: 300px; }
+  @media (max-width: 700px) {
+    .app { flex-direction: column; }
+    aside { width: auto; max-height: 45vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 12px 0 6px; }
+  h2:first-child { margin-top: 0; }
+  label { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  label span { width: 64px; flex: none; color: var(--muted); }
+  label output { width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { flex: 1; min-width: 0; }
+  select, input, button { font: inherit; color: var(--fg); background: var(--panel);
+                          border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; min-width: 0; }
+  input[type=date] { flex: 1; }
+  button { cursor: pointer; width: 100%; margin-top: 6px; }
+  #scenes { list-style: none; padding: 0; margin: 0; }
+  #scenes li { display: flex; gap: 8px; padding: 5px; border-radius: 6px; cursor: pointer; }
+  #scenes li:hover { background: var(--sel); }
+  #scenes li.on { background: var(--sel); outline: 1px solid var(--line); }
+  #scenes img { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; background: var(--line); }
+  #scenes small { color: var(--muted); }
+  #status { color: var(--muted); font-size: 12px; margin-top: 8px; white-space: pre-line; }
+  #status.error { color: #d70015; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sentinel-2, warped live in the browser</h1>
+  <p>Scenes from a STAC search; raw uint16 bands read with range requests by <code>wxy-tiff</code>,
+    warped by <code>wxy-warp</code> (wasm) to the map's own pixel grid on every move, and scaled here.</p>
+</header>
+<div class="app">
+  <aside>
+    <h2>Search this view</h2>
+    <label><span>From</span><input id="from" type="date"></label>
+    <label><span>To</span><input id="to" type="date"></label>
+    <label><span>Cloud</span><input id="cloud" type="range" min="0" max="100" value="20"><output id="cloudv">20%</output></label>
+    <button id="search">Search</button>
+
+    <h2>Display</h2>
+    <label><span>Bands</span>
+      <select id="combo">
+        <option value="red,green,blue">True colour (B4, B3, B2)</option>
+        <option value="nir,red,green">False colour (B8, B4, B3)</option>
+        <option value="swir22,nir08,red">SWIR (B12, B8A, B4)</option>
+        <option value="swir16,nir,blue">Agriculture (B11, B8, B2)</option>
+      </select>
+    </label>
+    <label><span>Black</span><input id="lo" type="range" min="0" max="0.5" step="0.005" value="0"><output id="lov"></output></label>
+    <label><span>White</span><input id="hi" type="range" min="0.02" max="1" step="0.005" value="0.25"><output id="hiv"></output></label>
+    <label><span>Gamma</span><input id="gamma" type="range" min="0.3" max="2.5" step="0.05" value="1"><output id="gammav"></output></label>
+    <label><span>Warp</span>
+      <select id="resampling">
+        <option value="near">nearest</option>
+        <option value="bilinear" selected>bilinear</option>
+        <option value="cubic">cubic</option>
+      </select>
+    </label>
+    <div id="status">Loading wasm...</div>
+    <p style="color: var(--muted); font-size: 12px">Also: <a href="index.html">one COG, any projection</a>.
+      Source: <a href="https://github.com/wxylib/web">wxylib/web</a>.</p>
+
+    <h2>Scenes</h2>
+    <ul id="scenes"></ul>
+  </aside>
+  <div id="map"></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module" src="s2.js"></script>
+</body>
+</html>

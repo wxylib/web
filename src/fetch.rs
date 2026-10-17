@@ -43,7 +43,10 @@ impl FetchReader {
     }
 
     async fn fetch(&self, range: Range<u64>) -> Result<Bytes, String> {
-        let js = |e: JsValue| format!("{e:?}");
+        let js = |e: JsValue| match e.dyn_ref::<js_sys::Error>() {
+            Some(err) => format!("{} ({})", String::from(err.message()), self.url),
+            None => e.as_string().unwrap_or_else(|| format!("{e:?}")),
+        };
         let init = web_sys::RequestInit::new();
         init.set_method("GET");
         let req = web_sys::Request::new_with_str_and_init(&self.url, &init).map_err(js)?;
