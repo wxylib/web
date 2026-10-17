@@ -28,6 +28,8 @@
   h2:first-child { margin-top: 0; }
   label { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
   label span { width: 64px; flex: none; color: var(--muted); }
+  label small { color: var(--muted); }
+  button:disabled { opacity: .5; cursor: default; }
   label output { width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
   input[type=range] { flex: 1; min-width: 0; }
   select, input, button { font: inherit; color: var(--fg); background: var(--panel);
@@ -49,7 +51,8 @@
 <header>
   <h1>Sentinel-2, warped live in the browser</h1>
   <p>Scenes from a STAC search; raw uint16 bands read with range requests by <code>wxy-tiff</code>,
-    warped by <code>wxy-warp</code> (wasm) to the map's own pixel grid on every move, and scaled here.</p>
+    warped by <code>wxy-warp</code> (wasm) to the map's own pixel grid on every move, block by block from the
+    centre outward, and scaled here.</p>
 </header>
 <div class="app">
   <aside>
@@ -78,11 +81,18 @@
         <option value="cubic">cubic</option>
       </select>
     </label>
+
+    <h2>Loading</h2>
+    <label><span>Scenes</span><input id="maxScenes" type="number" min="1" max="40" value="8" style="width: 64px"><small>at most, nearest the centre</small></label>
+    <label><span>Data</span><input id="maxMB" type="number" min="10" max="2000" step="10" value="250" style="width: 64px"><small>MB at most</small></label>
+    <label><input id="hold" type="checkbox"> Hold the map still while loading</label>
+    <button id="stop" disabled>Stop loading</button>
     <div id="status">Loading wasm...</div>
-    <p style="color: var(--muted); font-size: 12px">Also: <a href="index.html">one COG, any projection</a>.
-      Source: <a href="https://github.com/wxylib/web">wxylib/web</a>.</p>
+    <p style="color: var(--muted); font-size: 12px">Also: <a href="cog.html">one COG, any projection</a>;
+      <a href="index.html">all examples</a>. Source: <a href="https://github.com/wxylib/web">wxylib/web</a>.</p>
 
     <h2>Scenes</h2>
+    <label><input id="byday" type="checkbox"> Group by solar day (click a day to load all its scenes)</label>
     <ul id="scenes"></ul>
   </aside>
   <div id="map"></div>
