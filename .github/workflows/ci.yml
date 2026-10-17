@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: wxylib/fixtures
+          path: fixtures
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Native tests
+        run: cargo test
+        env:
+          WXY_FIXTURES: ${{ github.workspace }}/fixtures
+      - name: wasm-bindgen-cli at the locked version
+        run: |
+          v=$(grep -A1 'name = "wasm-bindgen"$' Cargo.lock | grep version | cut -d'"' -f2)
+          cargo install wasm-bindgen-cli --version "$v" --locked
+      - name: Build the wasm module
+        run: scripts/build.sh
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: www
+
+  # Publishes www/ to GitHub Pages from main. Needs Pages turned on with
+  # "GitHub Actions" as the source (Settings, Pages).
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

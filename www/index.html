@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wxylib warp</title>
+<style>
+  :root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --panel: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161618; --fg: #f2f2f2; --muted: #a1a1a6; --line: #3a3a3c; --panel: #1f1f22; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 4px 0 2px; }
+  p.lede { margin: 0 0 12px; color: var(--muted); }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin-bottom: 8px; }
+  label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+  select, input, button { font: inherit; color: var(--fg); background: var(--panel);
+                          border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; }
+  button { cursor: pointer; }
+  .url { display: flex; gap: 6px; margin-bottom: 8px; }
+  .url input { flex: 1; min-width: 0; }
+  canvas { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px;
+           background: repeating-conic-gradient(var(--panel) 0 25%, var(--bg) 0 50%) 0 0 / 16px 16px;
+           touch-action: none; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+  #status { margin-top: 6px; color: var(--muted); font-size: 12px; min-height: 2.9em; }
+  #status.error { color: #d70015; }
+  footer { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>wxylib warp in the browser</h1>
+  <p class="lede">A COG read with range requests by <code>wxy-tiff</code> and warped by <code>wxy-warp</code>,
+    both compiled to WebAssembly. The canvas is the target grid: drag to pan, scroll to zoom,
+    and every view is a fresh warp.</p>
+
+  <div class="controls">
+    <label>Source
+      <select id="source"></select>
+    </label>
+    <label>Projection
+      <select id="proj"></select>
+    </label>
+    <label>Resampling
+      <select id="resampling">
+        <option value="near">nearest</option>
+        <option value="bilinear" selected>bilinear</option>
+        <option value="cubic">cubic</option>
+      </select>
+    </label>
+  </div>
+  <div class="url">
+    <input id="url" type="url" spellcheck="false" aria-label="COG URL">
+    <input id="crs" type="text" spellcheck="false" aria-label="Target CRS" style="flex: 0 1 220px">
+    <button id="go">Warp</button>
+    <button id="fit" title="Fit the view to the whole source">Fit</button>
+  </div>
+
+  <canvas id="map" width="720" height="540"></canvas>
+  <div id="status">Loading wasm...</div>
+
+  <footer>Same code as the <code>wxy warp</code> command: GDAL's chunked warp, kernels and
+    overview choice, ported to Rust. CRS through proj4rs (EPSG codes and proj strings).
+    The COG must be served with CORS. <a href="https://github.com/wxylib/web">wxylib/web</a></footer>
+</main>
+<script type="module" src="main.js"></script>
+</body>
+</html>
