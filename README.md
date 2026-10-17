@@ -20,6 +20,8 @@ fetches only the tiles the view touches:
 
 ## Sentinel-2 on a web map
 
+The landing page (`www/index.html`, the Pages root) lists the examples.
+
 `www/s2.html` browses Sentinel-2 L2A: a STAC search of the map view
 (Earth Search, `sentinel-2-l2a`, dates and a cloud limit), footprints and a
 scene list, and the chosen scene drawn from its raw uint16 band COGs. Each
@@ -41,13 +43,33 @@ requests per band, 1.8 MB for all three):
 
 ![The whole scene, true colour, with STAC footprints](docs/img/s2-scene.jpg)
 
+With "Group by solar day" ticked, the list shows days instead of scenes
+(UTC time shifted by the scene's longitude, so a pass at 23:58 UTC over
+Tasmania counts as the next local morning). Clicking a day loads all its
+scenes in view onto the map. Every load, one scene or a day, cuts the view
+into 256 pixel blocks and warps them nearest the centre first (nearest
+scene first within a block), three at a time, painting each as it lands.
+Loading controls: at most N scenes (those nearest the centre), a cap on
+the data read (the load stops there and says so), a Stop button, and
+"Hold the map still while loading", which disables panning and zooming
+until the load ends. Without the hold, moving the map abandons the load
+and starts again from the new centre; the old picture stays until the new
+one is done.
+
+![A solar day of two scenes, 55GDN and 55GEN, side by side](docs/img/s2-day.jpg)
+
+Blocks fill from the centre out; this load stopped at a 20 MB cap:
+
+![A full-resolution load stopped at the cap](docs/img/s2-capped.jpg)
+
 In these screenshots the basemap tiles and the STAC response were stubbed
 (the build machine cannot reach them; the STAC items are the real ones from
 the `sentinel-cogs` bucket). The band reads and warps are live.
 
-Not yet: one scene at a time (no mosaic), the warp runs on the page's
-thread, and each full-resolution view fetches whole 1024 by 1024 tiles
-(about 1.5 MB each per band), so zooming in on a slow link is slow.
+Not yet: overlapping scenes are drawn over each other, not mosaicked by
+a rule (latest, least cloud); the warp runs on the page's thread; and each
+full-resolution view fetches whole 1024 by 1024 tiles (about 1.5 MB each
+per band), so zooming in on a slow link is slow.
 
 ## What is in it
 
@@ -70,7 +92,9 @@ thread, and each full-resolution view fetches whole 1024 by 1024 tiles
   // out.requests, out.bytes
   ```
 
-- `www/index.html`: one COG, any projection. Colouring is in JavaScript (percentile stretch; a
+- `www/index.html`: the landing page, listing the examples.
+- `www/s2.html`, `www/s2.js`: Sentinel-2 on a web map.
+- `www/cog.html`, `www/cog.js`: one COG, any projection. Colouring is in JavaScript (percentile stretch; a
   sea and land ramp when values straddle zero, viridis otherwise, RGB for
   three bands). While dragging it warps at half size with nearest
   neighbour, then once more at full size when the view settles.
@@ -92,7 +116,7 @@ is the planned route to full PROJ (design gate 4).
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --version 0.2.129   # the version in Cargo.lock
 scripts/build.sh                                   # -> www/pkg/
-python3 -m http.server -d www 8000                 # open http://localhost:8000/ or /s2.html
+python3 -m http.server -d www 8000                 # open http://localhost:8000/
 ```
 
 clang is needed for zstd's C code. `cargo test` runs the native tests; they

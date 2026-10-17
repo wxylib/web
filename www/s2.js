@@ -1,12 +1,15 @@
-// Sentinel-2 browser: STAC search, then each band of the chosen scene is
-// warped by wxy-warp (wasm) onto the map's own Web Mercator pixel grid
-// whenever the map moves. Scaling to colour happens here, so the stretch
-// sliders repaint without warping again.
+// Sentinel-2 browser: STAC search, then the chosen scene (or every scene
+// of a solar day) is warped by wxy-warp (wasm) onto the map's own Web
+// Mercator pixel grid whenever the map moves. The view is cut into blocks
+// that load from the centre outward, nearest scene first, each painted as
+// it lands. Scaling to colour happens here, so the stretch sliders repaint
+// without warping again.
 import init, { Cog } from "./pkg/wxy_web.js";
 
 const STAC = "https://earth-search.aws.element84.com/v1/search";
 const COLLECTION = "sentinel-2-l2a";
-const MAX_SIDE = 2048; // cap on the warped grid, in cells
+const BLOCK = 256; // screen pixels per block side
+const WORKERS = 3; // blocks in flight at once (their fetches overlap)
 
 const $ = (id) => document.getElementById(id);
 const status = $("status");
@@ -22,82 +25,168 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors; ' +
     'Sentinel-2 via <a href="https://element84.com/earth-search/">Earth Search</a>',
 }).addTo(map);
+const FOOT = { color: "#3a7bd5", weight: 1, fillOpacity: 0.04 };
+const FOOT_ON = { color: "#e8590c", weight: 2, fillOpacity: 0 };
 const footprints = L.geoJSON(null, {
-  style: { color: "#3a7bd5", weight: 1, fillOpacity: 0.04 },
-  onEachFeature: (f, layer) => layer.on("click", () => select(f)),
+  style: FOOT,
+  onEachFeature: (f, layer) => layer.on("click", () => choose([f], f.id)),
 }).addTo(map);
-let overlay = null;
 
-// State: the chosen scene, its opened bands, and the last warp
-let scene = null;      // { item, cogs: Map(key -> Promise<Cog>) }
-let last = null;       // { vals: [Float32Array x3], w, h, ext, keys }
-let busy = false, again = false;
+// State
+let items = [];        // search results
+let sel = null;        // { items, label, cogs: Map(href -> Promise<{c, bounds}>), bytes: Map(href -> n) }
+let layer = null;      // the L.layerGroup of painted blocks for the current load
+let blocks = [];       // painted blocks: { vals, w, h, ext, item, keys, overlay }
+let gen = 0;           // bumped by every new load and by Stop
+let loading = false;
 
-// The map's view as an extent in EPSG:3857 metres, [xmin, xmax, ymin, ymax],
-// and the size of one screen pixel in metres.
-function viewExtent() {
-  const b = map.getBounds(), P = (ll) => L.CRS.EPSG3857.project(ll);
-  const sw = P(b.getSouthWest()), ne = P(b.getNorthEast());
-  return { ext: [sw.x, ne.x, sw.y, ne.y], res: (ne.x - sw.x) / map.getSize().x };
+const P = (lon, lat) => L.CRS.EPSG3857.project(L.latLng(lat, lon));
+const U = (x, y) => L.CRS.EPSG3857.unproject(L.point(x, y));
+
+// Local solar date of an item: UTC time shifted by the scene's longitude.
+function solarDay(it) {
+  const b = it.bbox, lon = (b[0] + b[2]) / 2;
+  return new Date(Date.parse(it.properties.datetime) + lon * 240e3).toISOString().slice(0, 10);
 }
 
-function cog(key) {
-  if (!scene.cogs.has(key)) {
-    const href = scene.item.assets[key].href;
-    scene.cogs.set(key, Cog.open(href).then((c) => ({ c, bounds: c.bounds("EPSG:3857") })));
+// An item's bbox in EPSG:3857 (for planning; the exact bounds come from
+// the COG when it is opened).
+function itemExtent(it) {
+  const b = it.bbox, a = P(b[0], b[1]), c = P(b[2], b[3]);
+  return [a.x, c.x, a.y, c.y];
+}
+
+function cog(href) {
+  if (!sel.cogs.has(href)) {
+    sel.cogs.set(href, Cog.open(href).then((c) => ({ c, bounds: c.bounds("EPSG:3857") })));
   }
-  return scene.cogs.get(key);
+  return sel.cogs.get(href);
 }
 
-// Warp the current scene's three bands onto the visible part of the map.
+let held = false;
+function hold(on) {
+  held = on;
+  const hs = [map.dragging, map.scrollWheelZoom, map.doubleClickZoom, map.touchZoom, map.boxZoom, map.keyboard];
+  for (const h of hs) on ? h.disable() : h.enable();
+  map.zoomControl.getContainer().style.display = on ? "none" : "";
+}
+
+function finish(text, error = false) {
+  loading = false;
+  hold(false);
+  $("stop").disabled = true;
+  say(text, error);
+}
+
+// Load the selection into the view: blocks of the view grid, ordered by
+// distance from the centre, crossed with the selected scenes nearest the
+// centre, warped a few at a time.
 async function render() {
-  if (!scene) return;
-  if (busy) { again = true; return; }
-  busy = true;
-  try {
-    const keys = $("combo").value.split(",");
-    const alg = $("resampling").value;
-    const bands = await Promise.all(keys.map(cog));
-    const { ext: v, res } = viewExtent();
-    const s = bands[0].bounds;
-    const ext = [Math.max(v[0], s[0]), Math.min(v[1], s[1]), Math.max(v[2], s[2]), Math.min(v[3], s[3])];
-    if (ext[0] >= ext[1] || ext[2] >= ext[3]) {
-      if (overlay) { overlay.remove(); overlay = null; }
-      say("The scene is outside the view.");
-      return;
-    }
-    let w = Math.ceil((ext[1] - ext[0]) / res), h = Math.ceil((ext[3] - ext[2]) / res);
-    const k = Math.min(1, MAX_SIDE / Math.max(w, h));
-    w = Math.max(1, Math.round(w * k)); h = Math.max(1, Math.round(h * k));
-    say(`Warping ${w} x ${h} cells...`);
-    const t0 = performance.now();
-    const outs = await Promise.all(bands.map((b) => b.c.warp("EPSG:3857", ext, w, h, alg)));
-    const ms = performance.now() - t0;
-    last = { vals: outs.map((o) => o.values), w, h, ext, keys };
-    paint();
-    const req = outs.reduce((a, o) => a + o.requests, 0), mb = outs.reduce((a, o) => a + o.bytes, 0) / 1e6;
-    const lv = outs.map((o) => o.level === 0 ? "full" : "ovr " + o.level).join(", ");
-    say(`${scene.item.id}\n${w} x ${h} cells, ${alg}, ${ms.toFixed(0)} ms for 3 bands.\n` +
-        `Levels read: ${lv}. Range requests for this scene: ${req}, ${mb.toFixed(1)} MB.`);
-  } catch (e) {
-    say(String(e.message || e), true);
-  } finally {
-    busy = false;
-    if (again) { again = false; render(); }
+  if (!sel) return;
+  const my = ++gen;
+  const keys = $("combo").value.split(",");
+  const alg = $("resampling").value;
+  const size = map.getSize();
+  const b = map.getBounds(), sw = P(b.getWest(), b.getSouth()), ne = P(b.getEast(), b.getNorth());
+  const res = (ne.x - sw.x) / size.x;
+  const [vx0, vy1] = [sw.x, ne.y]; // view origin: top left
+  const cx = (sw.x + ne.x) / 2, cy = (sw.y + ne.y) / 2;
+  const dist = (e) => Math.hypot((e[0] + e[1]) / 2 - cx, (e[2] + e[3]) / 2 - cy);
+
+  // scenes in view, nearest first, capped
+  const inView = (e) => e[0] < ne.x && e[1] > sw.x && e[2] < ne.y && e[3] > sw.y;
+  const scenes = sel.items.map((it) => ({ it, e: itemExtent(it) })).filter((s) => inView(s.e))
+    .sort((p, q) => dist(p.e) - dist(q.e)).slice(0, Math.max(1, +$("maxScenes").value));
+  if (!scenes.length) {
+    if (layer) { layer.remove(); layer = null; }
+    blocks = [];
+    finish("The selection is outside the view.");
+    return;
   }
+  footprints.setStyle((f) => scenes.some((s) => s.it.id === f.id) ? FOOT_ON : FOOT);
+
+  // blocks of the view, in screen pixels, nearest the centre first
+  const jobs = [];
+  for (let y0 = 0; y0 < size.y; y0 += BLOCK) {
+    for (let x0 = 0; x0 < size.x; x0 += BLOCK) {
+      const x1 = Math.min(size.x, x0 + BLOCK), y1 = Math.min(size.y, y0 + BLOCK);
+      const e = [vx0 + x0 * res, vx0 + x1 * res, vy1 - y1 * res, vy1 - y0 * res];
+      for (const [k, s] of scenes.entries()) {
+        if (s.e[0] < e[1] && s.e[1] > e[0] && s.e[2] < e[3] && s.e[3] > e[2]) {
+          jobs.push({ px: [x0, x1, y0, y1], d: dist(e), k, it: s.it });
+        }
+      }
+    }
+  }
+  jobs.sort((p, q) => p.d - q.d || p.k - q.k);
+
+  // the previous load stays on screen until this one is done
+  const old = layer;
+  layer = L.layerGroup().addTo(map);
+  blocks = [];
+  loading = true;
+  $("stop").disabled = false;
+  if ($("hold").checked) hold(true);
+  const cap = +$("maxMB").value * 1e6;
+  const t0 = performance.now();
+  let done = 0, next = 0, capped = false;
+  const mb = () => [...sel.bytes.values()].reduce((a, n) => a + n, 0);
+  const progress = () => say(`${sel.label}: ${scenes.length} scene${scenes.length > 1 ? "s" : ""}, ` +
+    `block ${done} of ${jobs.length}, ${(mb() / 1e6).toFixed(1)} MB read.`);
+  progress();
+
+  async function run(job) {
+    const hrefs = keys.map((k) => job.it.assets[k].href);
+    const bands = await Promise.all(hrefs.map(cog));
+    if (my !== gen) return;
+    // the block, cut to the scene's exact bounds, snapped to whole pixels
+    const s = bands[0].bounds, [x0, x1, y0, y1] = job.px;
+    const px0 = Math.max(x0, Math.floor((s[0] - vx0) / res)), px1 = Math.min(x1, Math.ceil((s[1] - vx0) / res));
+    const py0 = Math.max(y0, Math.floor((vy1 - s[3]) / res)), py1 = Math.min(y1, Math.ceil((vy1 - s[2]) / res));
+    if (px0 >= px1 || py0 >= py1) return;
+    const w = px1 - px0, h = py1 - py0;
+    const ext = [vx0 + px0 * res, vx0 + px1 * res, vy1 - py1 * res, vy1 - py0 * res];
+    const outs = await Promise.all(bands.map((bd) => bd.c.warp("EPSG:3857", ext, w, h, alg)));
+    if (my !== gen) return;
+    outs.forEach((o, i) => sel.bytes.set(hrefs[i], o.bytes));
+    const blk = { vals: outs.map((o) => o.values), w, h, ext, item: job.it, keys, overlay: null };
+    blocks.push(blk);
+    paintBlock(blk);
+  }
+
+  async function worker() {
+    while (next < jobs.length && my === gen) {
+      if (mb() > cap) { capped = true; return; }
+      const job = jobs[next++];
+      try {
+        await run(job);
+      } catch (e) {
+        if (my === gen) { gen++; finish(String(e.message || e), true); }
+        return;
+      }
+      done++;
+      if (my === gen) progress();
+    }
+  }
+  await Promise.all(Array.from({ length: WORKERS }, worker));
+  if (old) old.remove();
+  if (my !== gen) return; // superseded or stopped
+  const secs = ((performance.now() - t0) / 1e3).toFixed(1);
+  finish(`${sel.label}: ${scenes.length} scene${scenes.length > 1 ? "s" : ""}, ${done} of ${jobs.length} blocks ` +
+    `in ${secs} s, ${alg}. ${(mb() / 1e6).toFixed(1)} MB read for this selection.` +
+    (capped ? `\nStopped at the ${$("maxMB").value} MB cap; raise it or zoom in.` : ""));
 }
 
-// Scale the last warp to colour: reflectance = DN * scale + offset (from
-// the STAC item's raster:bands), stretched black..white, then gamma.
-function paint() {
-  if (!last) return;
-  const { vals, w, h, ext, keys } = last;
+// Scale a block to colour: reflectance = DN * scale + offset (from the
+// STAC item's raster:bands), stretched black..white, then gamma.
+function paintBlock(blk) {
+  const { vals, w, h, ext, keys, item } = blk;
   const lo = +$("lo").value, hi = +$("hi").value, g = 1 / +$("gamma").value;
+  // Earth Search has already removed the BOA offset when this is set,
+  // though raster:bands still lists it
+  const applied = item.properties["earthsearch:boa_offset_applied"];
   const so = keys.map((k) => {
-    const rb = (scene.item.assets[k]["raster:bands"] || [{}])[0];
-    // Earth Search has already removed the BOA offset when this is set,
-    // though raster:bands still lists it
-    const applied = scene.item.properties["earthsearch:boa_offset_applied"];
+    const rb = (item.assets[k]["raster:bands"] || [{}])[0];
     return [rb.scale ?? 1e-4, applied ? 0 : rb.offset ?? 0];
   });
   const canvas = document.createElement("canvas");
@@ -116,25 +205,68 @@ function paint() {
     px[4 * i + 3] = any ? 255 : 0;
   }
   ctx.putImageData(img, 0, 0);
-  const U = (x, y) => L.CRS.EPSG3857.unproject(L.point(x, y));
   const bounds = L.latLngBounds(U(ext[0], ext[2]), U(ext[1], ext[3]));
+  const target = layer;
   canvas.toBlob((blob) => {
     const url = URL.createObjectURL(blob);
-    if (overlay) {
-      URL.revokeObjectURL(overlay._url);
-      overlay.setUrl(url).setBounds(bounds);
+    if (blk.overlay) {
+      URL.revokeObjectURL(blk.overlay._url);
+      blk.overlay.setUrl(url);
     } else {
-      overlay = L.imageOverlay(url, bounds, { interactive: false }).addTo(map);
+      blk.overlay = L.imageOverlay(url, bounds, { interactive: false }).addTo(target);
     }
   });
 }
 
-function select(item) {
-  if (scene) for (const p of scene.cogs.values()) p.then((b) => b.c.free()).catch(() => {});
-  scene = { item, cogs: new Map() };
-  last = null;
-  for (const li of $("scenes").children) li.classList.toggle("on", li.dataset.id === item.id);
+function repaint() {
+  for (const blk of blocks) paintBlock(blk);
+}
+
+// Select one scene or a day of scenes, dropping the last selection's files.
+function choose(list, label) {
+  if (sel) for (const p of sel.cogs.values()) p.then((b) => b.c.free()).catch(() => {});
+  sel = { items: list, label, cogs: new Map(), bytes: new Map() };
+  for (const li of $("scenes").children) li.classList.toggle("on", li.dataset.id === label);
   render();
+}
+
+function listScenes() {
+  const ul = $("scenes");
+  ul.replaceChildren();
+  const row = (id, thumb, title, sub, onclick) => {
+    const li = document.createElement("li");
+    li.dataset.id = id;
+    const img = document.createElement("img");
+    img.loading = "lazy"; img.alt = "";
+    img.src = thumb ?? "";
+    const txt = document.createElement("div");
+    txt.innerHTML = `${title}<br><small>${sub}</small>`;
+    li.append(img, txt);
+    li.onclick = onclick;
+    li.classList.toggle("on", sel?.label === id);
+    ul.append(li);
+  };
+  const tileOf = (p) => `${p["mgrs:utm_zone"] ?? ""}${p["mgrs:latitude_band"] ?? ""}${p["mgrs:grid_square"] ?? ""}`;
+  if ($("byday").checked) {
+    const days = new Map();
+    for (const it of items) {
+      const d = solarDay(it);
+      if (!days.has(d)) days.set(d, []);
+      days.get(d).push(it);
+    }
+    for (const [d, its] of [...days.entries()].sort((a, b) => b[0].localeCompare(a[0]))) {
+      const cloud = its.reduce((a, it) => a + +it.properties["eo:cloud_cover"], 0) / its.length;
+      const tiles = [...new Set(its.map((it) => tileOf(it.properties)))].sort().join(" ");
+      row("day:" + d, its[0].assets.thumbnail?.href, `${d}, ${its.length} scene${its.length > 1 ? "s" : ""}`,
+        `${tiles}; mean cloud ${cloud.toFixed(1)}%`, () => choose(its, "day:" + d));
+    }
+  } else {
+    for (const it of items) {
+      const p = it.properties;
+      row(it.id, it.assets.thumbnail?.href, p.datetime.slice(0, 10),
+        `tile ${tileOf(p)}, cloud ${(+p["eo:cloud_cover"]).toFixed(1)}%`, () => choose([it], it.id));
+    }
+  }
 }
 
 async function search() {
@@ -145,10 +277,9 @@ async function search() {
     datetime: `${$("from").value}T00:00:00Z/${$("to").value}T23:59:59Z`,
     query: { "eo:cloud_cover": { lt: +$("cloud").value } },
     sortby: [{ field: "properties.datetime", direction: "desc" }],
-    limit: 50,
+    limit: 100,
   };
   say("Searching " + COLLECTION + "...");
-  let items;
   try {
     const r = await fetch(STAC, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error(`STAC search: HTTP ${r.status}`);
@@ -159,23 +290,10 @@ async function search() {
   }
   footprints.clearLayers();
   footprints.addData(items);
-  const ul = $("scenes");
-  ul.replaceChildren();
-  for (const it of items) {
-    const p = it.properties, li = document.createElement("li");
-    li.dataset.id = it.id;
-    const img = document.createElement("img");
-    img.loading = "lazy"; img.alt = "";
-    img.src = it.assets.thumbnail?.href ?? "";
-    const tile = `${p["mgrs:utm_zone"] ?? ""}${p["mgrs:latitude_band"] ?? ""}${p["mgrs:grid_square"] ?? ""}`;
-    const txt = document.createElement("div");
-    txt.innerHTML = `${p.datetime.slice(0, 10)}<br><small>tile ${tile}, cloud ${(+p["eo:cloud_cover"]).toFixed(1)}%</small>`;
-    li.append(img, txt);
-    li.onclick = () => { select(it); };
-    ul.append(li);
-  }
-  say(items.length ? `${items.length} scenes. Pick one from the list or the map.` : "No scenes; widen the dates or the cloud limit.");
-  if (items.length && !scene) select(items[0]);
+  listScenes();
+  say(items.length ? `${items.length} scenes. Pick one (or a day) from the list or the map.` :
+    "No scenes; widen the dates or the cloud limit.");
+  if (items.length && !sel) choose([items[0]], items[0].id);
 }
 
 // Controls
@@ -190,7 +308,7 @@ const show = () => {
   $("gammav").value = (+$("gamma").value).toFixed(2);
 };
 show();
-for (const id of ["lo", "hi", "gamma"]) $(id).oninput = () => { show(); paint(); };
+for (const id of ["lo", "hi", "gamma"]) $(id).oninput = () => { show(); repaint(); };
 $("cloud").oninput = show;
 $("search").onclick = search;
 // a white point per band set (reflectance): visible bands are darker
@@ -201,10 +319,16 @@ $("combo").onchange = () => {
   render();
 };
 $("resampling").onchange = render;
-map.on("moveend", render);
+$("byday").onchange = listScenes;
+$("stop").onclick = () => {
+  gen++;
+  finish(`Stopped: ${blocks.length} blocks drawn. Move the map or pick again to load more.`);
+};
+map.on("moveend", () => { if (!held) render(); });
 
 await init();
 const q = new URLSearchParams(location.search);
 if (q.get("from")) $("from").value = q.get("from");
 if (q.get("to")) $("to").value = q.get("to");
+if (q.get("byday")) $("byday").checked = true;
 search();
