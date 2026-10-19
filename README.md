@@ -71,6 +71,45 @@ a rule (latest, least cloud); the warp runs on the page's thread; and each
 full-resolution view fetches whole 1024 by 1024 tiles (about 1.5 MB each
 per band), so zooming in on a slow link is slow.
 
+## GeoParquet, queried in the browser
+
+`www/vector.html` runs SQL over remote GeoParquet with DuckDB (wasm) and
+shows the result twice: as a table, and its `geometry` column (WKB) drawn
+on the map. Click a row to find its feature, or a feature to find its row.
+None of it is wxylib code. Vector access and query already exist (DuckDB,
+DataFusion, geoarrow-rs; design m09, section 6), so this page shows the
+piece wxylib hands vector work to rather than a new crate.
+
+The default sources are Overture Maps buildings (512 files, about 230 GB)
+and places (16 files, about 11 GB), latest release. Three levels of
+pruning keep a view's query small:
+
+1. the Overture STAC catalog gives each file's bbox, so only the files the
+   view meets are opened (all 512 buildings footers would be 471 MB; the
+   one file under central Hobart has a 1.5 MB footer);
+2. DuckDB reads that footer and keeps only the row groups whose `bbox`
+   column statistics meet the view;
+3. within those, it fetches only the columns the query names.
+
+A view of central Hobart's buildings then reads about 10 MB (measured
+with pyarrow, footer included). The status line counts the requests and bytes DuckDB
+makes. `{files}` and `{xmin}` to `{ymax}` in the SQL are filled in from
+the source and the map view; a query without `{files}` runs as written,
+and `?url=...` or `?sql=...` open one directly.
+
+![Overture building footprints in central Hobart and their attribute
+table](www/img/vector.jpg)
+
+Not yet: DuckDB loads its Parquet reader as an extension from
+extensions.duckdb.org on first use, which the build machine cannot reach,
+so this page was tested here with the rendering, WKB decoding (identical
+to shapely on Overture polygons), file pruning (against a stubbed STAC
+catalog) and byte counting, and the reads above were measured with
+pyarrow; the screenshot's rows are the real Overture rows for that view.
+No basemap tiles in the screenshot for the same reason. Big polygons are
+costly: Overture division areas put whole countries in a row group, and a
+city view of them reads about 170 MB of geometry.
+
 ## What is in it
 
 - `src/fetch.rs`: an async-tiff reader over the browser's `fetch` with
@@ -94,6 +133,7 @@ per band), so zooming in on a slow link is slow.
 
 - `www/index.html`: the landing page, listing the examples.
 - `www/s2.html`, `www/s2.js`: Sentinel-2 on a web map.
+- `www/vector.html`, `www/vector.js`, `www/wkb.js`: GeoParquet queried in the browser.
 - `www/cog.html`, `www/cog.js`: one COG, any projection. Colouring is in JavaScript (percentile stretch; a
   sea and land ramp when values straddle zero, viridis otherwise, RGB for
   three bands). While dragging it warps at half size with nearest
@@ -132,7 +172,8 @@ wxylib/core is pinned by git rev in `Cargo.toml`; bump it there.
 - Zarr: `wxy-zarr` does not build for wasm until `ChunkSource` drops its
   `Send`/`Sync` bound there (design doc 03, section 5). Virtual stores
   (Icechunk) are further off.
-- One source band set, one view; no tile pyramid, no overlay of vectors.
+- One source band set, one view; no tile pyramid, and the vector page is
+  separate from the raster ones (no vectors over a warped COG yet).
 
 Documentation: **https://wxylib.org/docs/**, one place for what works, how-tos,
 explainers, the design documents and how to help.

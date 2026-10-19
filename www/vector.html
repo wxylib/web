@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wxylib GeoParquet query</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --panel: #ffffff; --sel: #e8f0fe; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161618; --fg: #f2f2f2; --muted: #a1a1a6; --line: #3a3a3c; --panel: #1f1f22; --sel: #23324a; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--fg); display: flex; flex-direction: column;
+         font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); }
+  .app { flex: 1; display: flex; min-height: 0; }
+  aside { width: 340px; flex: none; overflow-y: auto; padding: 10px 12px; border-right: 1px solid var(--line); }
+  .view { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #map { flex: 3; min-height: 260px; }
+  #table { flex: 2; min-height: 160px; overflow: auto; border-top: 1px solid var(--line); background: var(--panel); }
+  @media (max-width: 700px) {
+    .app { flex-direction: column; }
+    aside { width: auto; max-height: 45vh; border-right: 0; border-bottom: 1px solid var(--line); }
+    .view { min-height: 70vh; }
+  }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 12px 0 6px; }
+  h2:first-child { margin-top: 0; }
+  label { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  select, input, button, textarea { font: inherit; color: var(--fg); background: var(--panel);
+                          border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; min-width: 0; }
+  select, input[type=url] { flex: 1; }
+  textarea { width: 100%; height: 190px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; resize: vertical; }
+  button { cursor: pointer; width: 100%; margin-top: 6px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hint { color: var(--muted); font-size: 12px; margin: 4px 0; }
+  #status { color: var(--muted); font-size: 12px; margin-top: 8px; white-space: pre-line; }
+  #status.error { color: #d70015; }
+  table { border-collapse: collapse; font-size: 12px; width: max-content; min-width: 100%; }
+  th, td { padding: 3px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap;
+           max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+  th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--sel); }
+  tbody tr.on { background: var(--sel); outline: 1px solid var(--muted); }
+  #table .empty { padding: 12px; color: var(--muted); }
+  code { font-size: 12px; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GeoParquet, queried in the browser</h1>
+  <p>SQL over remote GeoParquet with DuckDB (wasm): only the file footers and the row groups the query needs
+    are fetched, with range requests. The result is a table, and its geometry column is drawn on the map.</p>
+</header>
+<div class="app">
+  <aside>
+    <h2>Source</h2>
+    <label><select id="preset"></select></label>
+    <label id="urlrow" hidden><input id="url" type="url" placeholder="https://.../file.parquet"></label>
+    <p class="hint" id="presethint"></p>
+
+    <h2>Query</h2>
+    <textarea id="sql" spellcheck="false"></textarea>
+    <p class="hint"><code>{files}</code> is the source's file list; <code>{xmin}</code>, <code>{ymin}</code>,
+      <code>{xmax}</code>, <code>{ymax}</code> are the map view in longitude and latitude. The column named
+      <code>geometry</code> (WKB) is drawn.</p>
+    <label><input id="follow" type="checkbox"> Run again when the map stops moving</label>
+    <button id="run" disabled>Run</button>
+    <div id="status">Loading DuckDB...</div>
+    <p class="hint">Also: <a href="s2.html">Sentinel-2 on a web map</a>; <a href="cog.html">one COG, any
+      projection</a>; <a href="index.html">all examples</a>. Source: <a href="https://github.com/wxylib/web">wxylib/web</a>.</p>
+  </aside>
+  <div class="view">
+    <div id="map"></div>
+    <div id="table"><div class="empty">Run a query to see its rows here.</div></div>
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module" src="vector.js"></script>
+</body>
+</html>
