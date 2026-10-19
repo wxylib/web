@@ -134,7 +134,7 @@ wxylib/core is pinned by git rev in `Cargo.toml`; bump it there.
   (Icechunk) are further off.
 - One source band set, one view; no tile pyramid, no overlay of vectors.
 
-Documentation: **https://wxylib.github.io/docs/**, one place for what works, how-tos,
+Documentation: **https://wxylib.org/docs/**, one place for what works, how-tos,
 explainers, the design documents and how to help.
 
 License: MIT OR Apache-2.0.
