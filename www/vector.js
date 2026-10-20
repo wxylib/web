@@ -45,7 +45,9 @@ LIMIT 2000`,
   },
   url: {
     label: "A GeoParquet file at a URL",
-    hint: "Any GeoParquet (or Parquet with a WKB column called geometry) served with CORS and range requests.",
+    hint: "Any GeoParquet (or Parquet with a WKB column called geometry) served with CORS and range requests. " +
+      "Several URLs separated by spaces, or a numbered set such as part_{00000..00123}.parquet, are one source: " +
+      "the first query reads every footer for the files' bboxes, later ones open only the files the view meets.",
     sql: `SELECT *
 FROM read_parquet({files})
 LIMIT 500`,
@@ -213,9 +215,74 @@ async function sourceFiles() {
       (f.bbox[0] < v.xmax && f.bbox[2] > v.xmin && f.bbox[1] < v.ymax && f.bbox[3] > v.ymin));
     return { release, total: files.length, urls: hit.map((f) => f.url) };
   }
-  const url = $("url").value.trim();
-  if (!url) throw new Error("Give the URL of a GeoParquet file.");
-  return { release: null, total: 1, urls: [url] };
+  const urls = expandUrls($("url").value);
+  if (urls.length === 0) throw new Error("Give the URL of a GeoParquet file.");
+  if (urls.length === 1) return { release: null, total: 1, urls };
+  const files = await urlBboxes(urls);
+  const v = view();
+  const hit = files.filter((f) => !f.bbox ||
+    (f.bbox[0] < v.xmax && f.bbox[2] > v.xmin && f.bbox[1] < v.ymax && f.bbox[3] > v.ymin));
+  return { release: null, total: files.length, urls: hit.map((f) => f.url) };
+}
+
+// URLs from the box: several separated by spaces, and {00000..00123} in
+// one of them for a numbered set (zero padded to the first number's width).
+const MAX_FILES = 5000;
+function expandUrls(text) {
+  const out = [];
+  for (const tok of text.trim().split(/\s+/).filter(Boolean)) {
+    const m = tok.match(/\{(\d+)\.\.(\d+)\}/);
+    if (!m) {
+      out.push(tok);
+      continue;
+    }
+    const [lo, hi] = [+m[1], +m[2]];
+    const width = m[1].length;
+    if (hi < lo || hi - lo + 1 > MAX_FILES) throw new Error(`${m[0]} is more than ${MAX_FILES} files`);
+    for (let i = lo; i <= hi; i++) out.push(tok.replace(m[0], String(i).padStart(width, "0")));
+  }
+  if (out.length > MAX_FILES) throw new Error(`more than ${MAX_FILES} files`);
+  return out;
+}
+
+// Each file's bbox, from the GeoParquet "geo" metadata in its footer. The
+// first query over a set reads every footer once (the STAC catalog does
+// this job for Overture); the bboxes are then kept in the browser, so
+// later queries open only the files the view meets. A file without a bbox
+// is always opened.
+const indexes = new Map();
+function urlBboxes(urls) {
+  const key = `wxy-geo:${urls.length}:${urls[0]}:${urls[urls.length - 1]}`;
+  if (!indexes.has(key)) {
+    const job = (async () => {
+      try {
+        const kept = localStorage.getItem(key);
+        if (kept) return JSON.parse(kept);
+      } catch (e) { /* storage blocked */ }
+      say(`Reading ${urls.length} file footers for their bboxes (once per set)...`);
+      const bbox = new Map();
+      try {
+        const t = await conn.query(`SELECT file_name, decode(value) AS geo
+          FROM parquet_kv_metadata([${urls.map(sqlString).join(", ")}]) WHERE decode(key) = 'geo'`);
+        for (const row of t.toArray()) {
+          const geo = JSON.parse(row.geo);
+          const b = geo.columns?.[geo.primary_column]?.bbox;
+          if (Array.isArray(b) && (b.length === 4 || b.length === 6)) {
+            bbox.set(row.file_name, b.length === 4 ? b : [b[0], b[1], b[3], b[4]]);
+          }
+        }
+      } catch (e) {
+        console.warn("no file bboxes, opening every file:", e);
+        return urls.map((url) => ({ url, bbox: null }));
+      }
+      const files = urls.map((url) => ({ url, bbox: bbox.get(url) || null }));
+      try { localStorage.setItem(key, JSON.stringify(files)); } catch (e) { /* storage full or blocked */ }
+      return files;
+    })();
+    indexes.set(key, job);
+    job.catch(() => indexes.delete(key));
+  }
+  return indexes.get(key);
 }
 
 const sqlString = (s) => `'${s.replace(/'/g, "''")}'`;

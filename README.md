@@ -97,6 +97,13 @@ makes. `{files}` and `{xmin}` to `{ymax}` in the SQL are filled in from
 the source and the map view; a query without `{files}` runs as written,
 and `?url=...` or `?sql=...` open one directly.
 
+The URL box also takes a set of files: several URLs separated by spaces,
+or a numbered range such as `ftw_global_{00000..00123}.parquet` (zero
+padded to the first number's width). The first query over a set reads
+every footer once for each file's bbox (the GeoParquet `geo` metadata),
+kept in the browser after that, so later queries open only the files the
+view meets, the job the STAC catalog does for Overture.
+
 ![Overture building footprints in central Hobart and their attribute
 table](www/img/vector.jpg)
 
