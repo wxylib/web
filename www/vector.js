@@ -19,6 +19,7 @@ const PRESETS = {
     label: "Overture buildings (polygons)",
     stac: "buildings/building",
     s3: "theme=buildings/type=building",
+    home: [-42.8826, 147.3277, 17], // central Hobart
     hint: "Building footprints from Overture Maps, latest release: 512 files, about 230 GB. " +
       "A city-block view opens one of them, reads its footer (about 1.5 MB) and the few row groups " +
       "the view meets. Keep the view small: the filter is the view.",
@@ -33,6 +34,7 @@ LIMIT 3000`,
     label: "Overture places (points)",
     stac: "places/place",
     s3: "theme=places/type=place",
+    home: [-42.8826, 147.3277, 16],
     allowAll: true,
     hint: "Points of interest from Overture Maps, latest release: 16 files, about 11 GB. " +
       "The view usually meets one or two files (about 2 MB of footer each).",
@@ -70,6 +72,21 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 }).addTo(map);
 const STYLE = { color: "#3a7bd5", weight: 1.5, fillOpacity: 0.12, radius: 4 };
 const STYLE_ON = { color: "#e8590c", weight: 3, fillOpacity: 0.3, radius: 7 };
+// Outlines of the files of the source, where their bboxes are known, so
+// the data can be found on the map.
+const coverage = L.layerGroup().addTo(map);
+let coverageOf = null;
+function showCoverage(files) {
+  if (coverageOf === files) return;
+  coverageOf = files;
+  coverage.clearLayers();
+  for (const f of files) {
+    if (!f.bbox) continue;
+    L.rectangle([[f.bbox[1], f.bbox[0]], [f.bbox[3], f.bbox[2]]], {
+      color: "#6e6e73", weight: 1, dashArray: "4 4", fill: false, interactive: false,
+    }).addTo(coverage);
+  }
+}
 let shapes = null;     // L.geoJSON layer of the result
 let byRow = new Map(); // result row -> Leaflet layer
 let picked = null;     // row index on show
@@ -210,6 +227,7 @@ async function sourceFiles() {
   const p = PRESETS[$("preset").value];
   if (p.stac) {
     const { release, files } = await overtureFiles(p);
+    showCoverage(files);
     const v = view();
     const hit = files.filter((f) => !f.bbox ||
       (f.bbox[0] < v.xmax && f.bbox[2] > v.xmin && f.bbox[1] < v.ymax && f.bbox[3] > v.ymin));
@@ -219,6 +237,7 @@ async function sourceFiles() {
   if (urls.length === 0) throw new Error("Give the URL of a GeoParquet file.");
   if (urls.length === 1) return { release: null, total: 1, urls };
   const files = await urlBboxes(urls);
+  showCoverage(files);
   const v = view();
   const hit = files.filter((f) => !f.bbox ||
     (f.bbox[0] < v.xmax && f.bbox[2] > v.xmin && f.bbox[1] < v.ymax && f.bbox[3] > v.ymin));
@@ -438,6 +457,7 @@ async function run() {
     say(`Querying${opened ? ` ${opened}` : ""}${release ? ` (Overture ${release})` : ""}...`);
     const table = await conn.query(fill(sql, urls));
     const s = show(table);
+    $("fit").disabled = s.features === 0;
     if (!/\{(xmin|xmax|ymin|ymax)\}/.test(sql) && s.features > 0) map.fitBounds(shapes.getBounds(), { padding: [20, 20] });
     const ms = performance.now() - t0;
     const mb = (io.bytes - b0) / 1e6;
@@ -464,23 +484,32 @@ async function run() {
 
 // Controls
 for (const [key, p] of Object.entries(PRESETS)) $("preset").add(new Option(p.label, key));
-function choosePreset() {
-  const p = PRESETS[$("preset").value];
+function choosePreset(go = true) {
+  const key = $("preset").value;
+  const p = PRESETS[key];
   $("sql").value = p.sql;
   $("presethint").textContent = p.hint;
-  $("urlrow").hidden = !!p.theme;
+  $("urlrow").hidden = !!p.stac;
+  coverage.clearLayers();
+  coverageOf = null;
+  // Outline the files straight away, so there is something to zoom to.
+  if (p.stac) overtureFiles(p).then((c) => { if ($("preset").value === key) showCoverage(c.files); }, () => {});
+  if (go && p.home) map.setView(p.home.slice(0, 2), p.home[2]);
 }
-$("preset").addEventListener("change", choosePreset);
+$("preset").addEventListener("change", () => choosePreset());
+$("fit").addEventListener("click", () => {
+  if (shapes && shapes.getLayers().length) map.fitBounds(shapes.getBounds(), { padding: [20, 20] });
+});
 $("run").addEventListener("click", run);
 map.on("moveend", () => { if ($("follow").checked) run(); });
 
 // Deep links: ?preset=places&url=...&sql=...
 const q = new URLSearchParams(location.search);
 if (q.has("preset") && PRESETS[q.get("preset")]) $("preset").value = q.get("preset");
-choosePreset();
+choosePreset(false);
 if (q.has("url")) {
   $("preset").value = "url";
-  choosePreset();
+  choosePreset(false);
   $("url").value = q.get("url");
 }
 if (q.has("sql")) $("sql").value = q.get("sql");

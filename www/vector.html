@@ -70,9 +70,10 @@
     <textarea id="sql" spellcheck="false"></textarea>
     <p class="hint"><code>{files}</code> is the source's file list; <code>{xmin}</code>, <code>{ymin}</code>,
       <code>{xmax}</code>, <code>{ymax}</code> are the map view in longitude and latitude. The column named
-      <code>geometry</code> (WKB) is drawn.</p>
+      <code>geometry</code> (WKB) is drawn. Dashed boxes are the source's files, where their extents are known: the data is inside them.</p>
     <label><input id="follow" type="checkbox"> Run again when the map stops moving</label>
     <button id="run" disabled>Run</button>
+    <button id="fit" disabled>Zoom to the results</button>
     <div id="status">Loading DuckDB...</div>
     <p class="hint">Also: <a href="s2.html">Sentinel-2 on a web map</a>; <a href="cog.html">one COG, any
       projection</a>; <a href="index.html">all examples</a>. Source: <a href="https://github.com/wxylib/web">wxylib/web</a>.</p>
