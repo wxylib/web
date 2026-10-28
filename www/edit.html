@@ -93,6 +93,40 @@
     </div>
     <div id="frame" class="hint"></div>
 
+    <h2>Frame and ground</h2>
+    <div class="row">
+      <label>data CRS <input id="srcCrs" type="text" placeholder="unknown" style="width:150px" autocomplete="off"></label>
+    </div>
+    <div class="row">
+      <label>edit CRS <input id="editCrs" type="text" placeholder="as the data" style="width:150px" autocomplete="off"></label>
+      <button id="utm" title="The UTM zone at the data's centre">UTM</button>
+      <button id="applyFrame">Apply</button>
+    </div>
+    <p class="hint">EPSG codes or proj strings (proj4rs, in wasm). Edits happen in the edit CRS; longitude and latitude
+      with no edit CRS get a local plane. Vertices you have not touched are still written back exactly as read.</p>
+    <div class="row">
+      <label>distances <select id="measure"><option value="grid">on the grid</option>
+        <option value="ground">on the ellipsoid</option></select></label>
+    </div>
+    <div class="row">
+      <label>north <select id="north"><option value="grid">grid north</option>
+        <option value="true">true north</option></select></label>
+    </div>
+    <div class="row">
+      <label>edges <select id="edges"><option value="grid">straight on the grid</option>
+        <option value="geodesic">geodesics</option></select></label>
+    </div>
+    <p class="hint">Ellipsoid distances use the point scale factor (exact geodesic when angle and distance are both
+      locked); true north applies the grid convergence. Geodesic edges are drawn and snapped as the curve between the
+      vertices. The readout shows ground distance, true azimuth, k and convergence.</p>
+    <div class="row">
+      <input id="cogUrl" type="url" placeholder="underlay COG URL (CORS)">
+      <button id="loadCog">Underlay</button>
+    </div>
+    <div class="row">
+      <label>opacity <input id="opacity" type="range" min="0" max="1" step="0.05" value="0.85"></label>
+    </div>
+
     <h2>Tool</h2>
     <div class="row modes">
       <button data-mode="edit" title="Select and edit vertices (1)">Edit</button>
@@ -100,6 +134,7 @@
       <button data-mode="LineString" title="Draw a line (3)">Line</button>
       <button data-mode="Polygon" title="Draw a polygon (4)">Polygon</button>
       <button data-mode="nudge" title="Nudge brush (5)">Nudge</button>
+      <button data-mode="pattern" title="Field patterns (6)">Pattern</button>
     </div>
     <div class="row">
       <button id="undo" title="Ctrl+Z">Undo</button>
@@ -132,6 +167,38 @@
       </select> deg</label>
       <label><input type="checkbox" id="bearingRel"> relative</label>
     </div>
+
+    <h2>Field patterns <span class="tiny">(<kbd>6</kbd>)</span></h2>
+    <div class="row">
+      <select id="pKind">
+        <option value="lines">parallel transects</option>
+        <option value="fill">fill the selected polygon</option>
+        <option value="repeat">repeat the selected feature</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>count <input id="pCount" type="number" value="5" min="1" step="1" style="width:56px"></label>
+      <label>spacing <input id="pSpacing" type="number" value="10" step="any" style="width:70px"></label>
+    </div>
+    <div class="row">
+      <label>length <input id="pLength" type="number" value="60" step="any" style="width:80px"></label>
+      <label>azimuth <input id="pAz" type="number" value="0" step="any" style="width:80px"></label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="pCentred"> centred</label>
+      <label><input type="checkbox" id="pClip"> clip to polygon</label>
+      <label><input type="checkbox" id="pTrack"> one lawnmower track</label>
+    </div>
+    <div class="row">
+      <label>margin <input id="pMargin" type="number" value="0" step="any" style="width:70px"></label>
+      <button id="pCreate" title="Enter">Create</button>
+      <span id="pInfo" class="tiny"></span>
+    </div>
+    <p class="hint">Select the survey polygon in Edit first if the pattern should fill or clip to it. Then press on the
+      canvas for the origin (snaps apply) and drag to set the azimuth and length; edit the numbers to refine. With a CRS,
+      spacing, length and step are metres on the ellipsoid and the azimuth is true; each transect is a geodesic from its
+      own start at that azimuth. "Repeat" steps the selected feature by the spacing along the azimuth, each vertex moved
+      on the ellipsoid. Create (<kbd>Enter</kbd>) adds the whole pattern as one undo.</p>
 
     <h2>Nudge brush <span class="tiny">(<kbd>5</kbd>)</span></h2>
     <div class="row">
@@ -192,7 +259,7 @@
     <details>
       <summary>Keys and mouse</summary>
       <p class="hint">
-        <kbd>1</kbd> to <kbd>5</kbd> tools. Drag with the right or middle button, or hold <kbd>Space</kbd>, to pan;
+        <kbd>1</kbd> to <kbd>6</kbd> tools. Drag with the right or middle button, or hold <kbd>Space</kbd>, to pan;
         wheel to zoom. <kbd>F</kbd> fits the data.<br>
         Edit: click a feature to select it, drag a vertex to move it, drag a midpoint marker or double-click a
         segment to insert a vertex, <kbd>Delete</kbd> removes the selected vertex (or the feature when no vertex is
