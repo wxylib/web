@@ -145,7 +145,12 @@ without it the page still edits in data coordinates or a local plane.
   zooming in traces finer detail), then pushed out of the ball or, with
   `Shift`, smudged along with it; size, spacing and power are set in the
   panel, `[` and `]` resize. New vertices the stroke did not move are
-  dropped, and each stroke is one operation.
+  dropped, and each stroke is one operation. "Keep rings simple" (on by
+  default) stops a vertex where its edges would cross another edge of
+  the feature, so a stroke cannot make a polygon invalid.
+- Crossings, however they were made, are ringed in red: always for
+  polygons (invalid), for a line when it is selected (valid but not
+  simple), and counted in the feature panel. Nothing is refused.
 - Field patterns (`6`): transects, transects filling a polygon, a
   lawnmower track and repeats, in ground metres and true azimuths.
 - A coordinate table beside the drawing, editable to full precision.
@@ -223,8 +228,14 @@ The nudge brush pushing a bend into the creek:
 
 ![A nudge stroke pushing a bend into a line](docs/img/edit-nudge.jpg)
 
+The same push through a parcel with "keep rings simple" off and on: off,
+the walls fold through each other at the tip and every crossing is
+ringed; on, each vertex stops at the edge it would have crossed:
+
+![A push stroke with keep rings simple off and on](docs/img/edit-keep.jpg)
+
 The engine (`www/edit-core.js`: geometry, snapping, constraints, the
-operation log), `www/edit-geo.js` (geodesics, convergence, scale
+operation log, crossings), `www/edit-geo.js` (geodesics, convergence, scale
 factor) and `www/edit-pattern.js` (transects, cover, clip, repeat) have no DOM and are tested with node
 (`node scripts/edit-core-test.mjs`, also in CI); `www/edit.js` is the
 canvas and the panels. The sample is synthetic (six parcels, a road, a

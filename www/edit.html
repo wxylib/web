@@ -7,11 +7,11 @@
 <style>
   :root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --panel: #ffffff; --sel: #e8f0fe;
           --canvas: #f4f3ef; --feat: #3b6ea5; --fill: rgba(59, 110, 165, 0.12); --accent: #c2410c;
-          --edited: #d97706; --guide: #7c3aed; --snap: #db2777; --grid: rgba(0, 0, 0, 0.12); --draft: #15803d; }
+          --edited: #d97706; --guide: #7c3aed; --snap: #db2777; --grid: rgba(0, 0, 0, 0.12); --draft: #15803d; --bad: #dc2626; }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #161618; --fg: #f2f2f2; --muted: #a1a1a6; --line: #3a3a3c; --panel: #1f1f22; --sel: #23324a;
             --canvas: #1b1c1f; --feat: #7aa7d9; --fill: rgba(122, 167, 217, 0.14); --accent: #fb923c;
-            --edited: #fbbf24; --guide: #a78bfa; --snap: #f472b6; --grid: rgba(255, 255, 255, 0.10); --draft: #4ade80; }
+            --edited: #fbbf24; --guide: #a78bfa; --snap: #f472b6; --grid: rgba(255, 255, 255, 0.10); --draft: #4ade80; --bad: #f87171; }
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
@@ -202,17 +202,22 @@
 
     <h2>Nudge brush <span class="tiny">(<kbd>5</kbd>)</span></h2>
     <div class="row">
-      <label>size <input id="nSize" type="number" value="30" min="4" max="200" style="width:60px"> px</label>
+      <label>size <input id="nSize" type="number" value="16" min="4" max="200" style="width:60px"> px</label>
       <label>spacing <input id="nStep" type="number" value="4" min="0.5" step="0.5" style="width:56px"> px</label>
     </div>
     <div class="row">
       <label>power <input id="nPower" type="range" min="0.05" max="1" step="0.05" value="0.6"></label>
       <select id="nMode"><option value="push">push</option><option value="smudge">smudge</option></select>
     </div>
+    <div class="row">
+      <label><input type="checkbox" id="nKeep" checked> keep rings simple (stop at other edges)</label>
+    </div>
     <p class="hint">A soft ball: drag it against the selected feature (or click a feature to start). The segments it
       touches are densified at the spacing, then pushed out of the ball, or smudged along with it; <kbd>Shift</kbd>
       swaps push and smudge, <kbd>[</kbd> and <kbd>]</kbd> resize. Spacing is in screen pixels, so zooming in traces
-      finer detail. New vertices the stroke did not move are dropped, and each stroke is one undo.</p>
+      finer detail. New vertices the stroke did not move are dropped, and each stroke is one undo. With "keep rings
+      simple" a vertex stops where its edges would cross another edge of the feature. Crossings, however made, are
+      ringed in red (polygons always, a line when selected).</p>
 
     <h2>Constraints</h2>
     <table class="cs">
