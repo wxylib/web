@@ -139,6 +139,12 @@ libraries, and it does not use the wasm module.
   lock on the circle's crossing.
 - Edit: drag vertices, drag a midpoint to insert one, delete, and move
   vertices two features share together. Draw points, lines and polygons.
+- A nudge brush (`5`): a soft ball dragged against a feature. The
+  segments it touches are densified at a spacing in screen pixels (so
+  zooming in traces finer detail), then pushed out of the ball or, with
+  `Shift`, smudged along with it; size, spacing and power are set in the
+  panel, `[` and `]` resize. New vertices the stroke did not move are
+  dropped, and each stroke is one operation.
 - A coordinate table beside the drawing, editable to full precision.
 - Every edit is an operation in a log (move, insert, delete, add,
   remove), undone and redone in order and downloadable as JSON lines.
@@ -154,6 +160,10 @@ picked from the road with `P`), ending exactly where it meets the road
 (segment snap and angle lock combined):
 
 ![Drawing a line perpendicular to a road](docs/img/edit-perp.jpg)
+
+The nudge brush pushing a bend into the creek:
+
+![A nudge stroke pushing a bend into a line](docs/img/edit-nudge.jpg)
 
 The engine (`www/edit-core.js`: geometry, snapping, constraints, the
 operation log) has no DOM and is tested with node

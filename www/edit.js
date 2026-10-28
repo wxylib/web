@@ -4,7 +4,7 @@
 import {
   fromGeoJSON, toGeoJSON, featureById, docBbox, snap, constrain, prevDirection, segments,
   History, canDelete, newFeature, closestOnSegment, pointInRing, ringArea, ringLength,
-  dist, fromTheta, add, mul,
+  dist, fromTheta, add, mul, sub, touch, apply, nudgeStart, nudgeStep, finishNudge,
 } from "./edit-core.js";
 
 const $ = (id) => document.getElementById(id);
@@ -24,6 +24,8 @@ const S = {
   pending: null,      // "perp" | "para": the next click picks a segment
   space: false,
 };
+
+const drawingMode = () => S.mode === "Point" || S.mode === "LineString" || S.mode === "Polygon";
 
 // ---- view transforms -------------------------------------------------------
 
@@ -157,7 +159,7 @@ function lockStyle() {
 // The reference point and the direction before it for whatever is being
 // placed: the previous vertex of the draft, or of the dragged vertex.
 function reference() {
-  if (S.mode !== "edit" && S.draft.length) {
+  if (drawingMode() && S.draft.length) {
     const n = S.draft.length;
     return { ref: S.draft[n - 1], prev: prevDirection(S.draft, n - 1, false) };
   }
@@ -185,11 +187,11 @@ function pointer(sx, sy) {
       const { fid, ri, a, b } = S.drag;
       skipSeg = (f, r, i, j) => f === fid && r === ri && i === a && j === b;
     }
-    const extra = S.mode !== "edit" && S.draft.length ? [{ xy: S.draft, closed: false }] : [];
+    const extra = drawingMode() && S.draft.length ? [{ xy: S.draft, closed: false }] : [];
     sn = snap(S.doc, w, tol, snapOpts(), skip, skipSeg, extra);
   }
   const cursor = sn ? sn.pt : w;
-  const placing = S.drag ? S.drag.kind !== "pan" : S.mode !== "edit";
+  const placing = S.drag ? S.drag.kind === "vertex" || S.drag.kind === "mid" : drawingMode();
   let pt = cursor, guides = [];
   if (placing) {
     const { ref, prev } = reference();
@@ -310,6 +312,19 @@ cv.addEventListener("mousedown", (e) => {
     pointer(s[0], s[1]); draw();
     return;
   }
+  if (S.mode === "nudge") {
+    if (!S.sel) {
+      const fid = hitFeature(s);
+      if (!fid) return;
+      S.sel = { fid, ri: null, vi: null };
+    }
+    const f = featureById(S.doc, S.sel.fid);
+    S.drag = { kind: "nudge", fid: f.id, w: f.rings.map(nudgeStart),
+      before: f.rings.map((r) => ({ xy: r.xy.map((p) => p.slice()), src: r.src.slice() })), last: toWorld(s) };
+    nudge(s, e.shiftKey);
+    panels(); draw();
+    return;
+  }
   if (S.mode === "edit") {
     const v = hitVertex(s);
     if (v) {
@@ -351,6 +366,8 @@ cv.addEventListener("mousemove", (e) => {
     S.view.cy = S.drag.c0[1] + (e.offsetY - S.drag.s0[1]) * S.view.scale;
     draw(); return;
   }
+  if (S.drag && S.drag.kind === "nudge") { nudge([e.offsetX, e.offsetY], e.shiftKey); draw(); return; }
+  if (S.mode === "nudge") { S.hit = { snap: null, pt: toWorld(S.mouse), guides: [] }; draw(); return; }
   if (S.drag) S.drag.moved = true;
   pointer(e.offsetX, e.offsetY);
   draw();
@@ -359,6 +376,7 @@ cv.addEventListener("mousemove", (e) => {
 window.addEventListener("mouseup", () => {
   const d = S.drag;
   S.drag = null;
+  if (d && d.kind === "nudge") { endNudge(d); return; }
   if (!d || d.kind === "pan" || !d.moved || !S.hit) { draw(); return; }
   const to = S.hit.pt.slice();
   if (d.kind === "vertex") {
@@ -408,6 +426,60 @@ cv.addEventListener("drop", (e) => {
   const f = e.dataTransfer.files[0];
   if (f) loadFile(f);
 });
+
+// ---- the nudge brush ----------------------------------------------------------------------
+
+// The brush size and the densify spacing are in screen pixels, so the
+// same stroke traces finer detail the further in the view is zoomed.
+function nudgeOpts(shift) {
+  return { r: (+$("nSize").value || 30) * S.view.scale, step: (+$("nStep").value || 4) * S.view.scale,
+    power: Math.max(0, Math.min(1, +$("nPower").value)), mode: shift ? ($("nMode").value === "push" ? "smudge" : "push") : $("nMode").value };
+}
+
+function nudge(s, shift) {
+  const d = S.drag;
+  const c = toWorld(s);
+  const o = nudgeOpts(shift);
+  const f = featureById(S.doc, d.fid);
+  const delta = sub(c, d.last);
+  d.w.forEach((w, ri) => {
+    nudgeStep(w, c, o.r, o.step, o.power, o.mode, delta);
+    f.rings[ri].xy = w.xy; f.rings[ri].src = w.src; // live while the stroke lasts
+  });
+  touch(f);
+  d.last = c;
+}
+
+// The stroke becomes one operation: a reshape of each ring it moved.
+function endNudge(d) {
+  const f = featureById(S.doc, d.fid);
+  const ops = [];
+  d.w.forEach((w, ri) => {
+    f.rings[ri].xy = d.before[ri].xy.map((p) => p.slice()); f.rings[ri].src = d.before[ri].src.slice();
+    if (!w.moved.some(Boolean)) return;
+    ops.push({ op: "reshape", fid: f.id, ri, before: d.before[ri], after: finishNudge(w) });
+  });
+  touch(f);
+  if (ops.length) {
+    const op = ops.length > 1 ? { op: "batch", ops } : ops[0];
+    S.hist.record(apply(S.doc, op));
+  }
+  panels(); draw();
+}
+
+function drawBrush(c) {
+  if (!S.mouse) return;
+  const r = +$("nSize").value || 30;
+  const [x, y] = S.mouse;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, "rgba(219, 39, 119, 0.22)");
+  g.addColorStop(0.75, "rgba(219, 39, 119, 0.12)");
+  g.addColorStop(1, "rgba(219, 39, 119, 0)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill();
+  ctx.strokeStyle = c.snap; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+  ctx.stroke(); ctx.setLineDash([]);
+}
 
 // ---- placing and finishing ---------------------------------------------------------------
 
@@ -486,6 +558,11 @@ window.addEventListener("keydown", (e) => {
   else if (k === "2") setMode("Point");
   else if (k === "3") setMode("LineString");
   else if (k === "4") setMode("Polygon");
+  else if (k === "5") setMode("nudge");
+  else if (k === "[" || k === "]") {
+    const el = $("nSize");
+    el.value = Math.max(4, Math.min(200, Math.round((+el.value || 30) * (k === "]" ? 1.25 : 0.8))));
+  }
   else if (k === "s") $("snapOn").checked = !$("snapOn").checked;
   else if (k === "b") {
     const b = $("bearing");
@@ -602,6 +679,7 @@ function draw() {
           ctx.fillStyle = picked ? c.accent : edited ? c.edited : c.canvas;
           ctx.strokeStyle = picked ? c.accent : edited ? c.edited : c.fg;
           ctx.lineWidth = 1.2;
+          if (S.mode === "nudge") { ctx.fillStyle = ctx.strokeStyle; ctx.fillRect(s[0] - 1.5, s[1] - 1.5, 3, 3); return; }
           ctx.fillRect(s[0] - 3.5, s[1] - 3.5, 7, 7);
           ctx.strokeRect(s[0] - 3.5, s[1] - 3.5, 7, 7);
         });
@@ -620,17 +698,18 @@ function draw() {
   }
 
   // guides, the snap and the placed point
-  if (S.hit && (S.mode !== "edit" || S.drag)) drawGuides(S.hit.guides, c.guide);
+  if (S.hit && (drawingMode() || (S.drag && S.drag.kind !== "nudge"))) drawGuides(S.hit.guides, c.guide);
   if (S.hit && S.hit.snap) {
     // a segment snap under a line or circle constraint lands where the two cross
     const sn = S.hit.snap.kind === "segment" && S.hit.guides.length ? { ...S.hit.snap, pt: S.hit.pt } : S.hit.snap;
     drawSnap(sn, c.snap);
   }
-  if (S.hit && (S.mode !== "edit" || (S.drag && S.drag.kind !== "pan"))) {
+  if (S.hit && (drawingMode() || (S.drag && (S.drag.kind === "vertex" || S.drag.kind === "mid")))) {
     const s = toScreen(S.hit.pt);
     ctx.strokeStyle = c.draft; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(s[0] - 6, s[1]); ctx.lineTo(s[0] + 6, s[1]); ctx.moveTo(s[0], s[1] - 6); ctx.lineTo(s[0], s[1] + 6); ctx.stroke();
   }
+  if (S.mode === "nudge") drawBrush(c);
   readout();
 }
 
@@ -687,7 +766,7 @@ function readout() {
   const p = S.hit ? S.hit.pt : null;
   parts.push(p ? `x ${fmt(p[0])}  y ${fmt(p[1])}` : "x -  y -");
   parts.push(`snap ${S.hit && S.hit.snap ? S.hit.snap.kind : "-"}`);
-  const { ref } = (S.mode !== "edit" || S.drag) ? reference() : { ref: null };
+  const { ref } = (drawingMode() || S.drag) ? reference() : { ref: null };
   if (ref && p) {
     const th = Math.atan2(p[1] - ref[1], p[0] - ref[0]);
     parts.push(`d ${fmt(dist(ref, p))}  a ${fmt(fromTheta(th, $("conv").value), 4)}`);
