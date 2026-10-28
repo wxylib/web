@@ -25,6 +25,8 @@ jobs:
         run: cargo test
         env:
           WXY_FIXTURES: ${{ github.workspace }}/fixtures
+      - name: Editing canvas engine tests
+        run: node scripts/edit-core-test.mjs
       - name: wasm-bindgen-cli at the locked version
         run: |
           v=$(grep -A1 'name = "wasm-bindgen"$' Cargo.lock | grep version | cut -d'"' -f2)
