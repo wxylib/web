@@ -387,6 +387,7 @@ export function prevDirection(xy, i, closed) {
 //   { op: "add",    feature }            (feature as stored, deep copy)
 //   { op: "remove", feature, index }
 //   { op: "batch",  ops }
+//   { op: "reshape", fid, ri, before: { xy, src }, after: { xy, src } }
 
 export function apply(doc, op) {
   switch (op.op) {
@@ -429,6 +430,13 @@ export function apply(doc, op) {
     case "batch":
       for (const o of op.ops) apply(doc, o);
       break;
+    case "reshape": {
+      const r = featureById(doc, op.fid).rings[op.ri];
+      r.xy = op.after.xy.map((p) => p.slice());
+      r.src = op.after.src.map((p) => (p ? p.slice() : null));
+      touch(featureById(doc, op.fid));
+      break;
+    }
   }
   return op;
 }
@@ -441,6 +449,7 @@ export function invert(op) {
     case "add": return { op: "remove", feature: op.feature };
     case "remove": return { op: "add", feature: op.feature, index: op.index };
     case "batch": return { op: "batch", ops: op.ops.map(invert).reverse() };
+    case "reshape": return { op: "reshape", fid: op.fid, ri: op.ri, before: op.after, after: op.before };
   }
 }
 
@@ -456,6 +465,8 @@ export function clone(f) {
 export class History {
   constructor(doc) { this.doc = doc; this.done = []; this.undone = []; }
   run(op) { apply(this.doc, op); this.done.push(op); this.undone = []; return op; }
+  // An operation already applied to the document (a nudge stroke).
+  record(op) { this.done.push(op); this.undone = []; return op; }
   undo() {
     const op = this.done.pop();
     if (!op) return null;
@@ -492,4 +503,61 @@ export function newFeature(doc, type, xy) {
     ? [{ part: 0, closed: false, xy: [xy[0].slice()], src: [null] }]
     : [{ part: 0, closed, xy: xy.map((p) => p.slice()), src: xy.map(() => null) }];
   return { id, type, props: {}, rings };
+}
+
+// ---- the nudge brush ----------------------------------------------------------------
+
+// A soft ball dragged against a ring. Each step first densifies the
+// segments the ball touches (no gap longer than step, so detail follows
+// the zoom), then moves the vertices inside the ball: "push" moves them
+// toward the rim (power 1 is a hard ball, less is softer); "smudge"
+// carries them along with the pointer's motion delta, weighted by a
+// smooth falloff from the centre. w is a working ring { xy, src, ins,
+// moved } that finishNudge() turns back into a plain one.
+export function nudgeStart(ring) {
+  return { closed: ring.closed, xy: ring.xy.map((p) => p.slice()), src: ring.src.slice(),
+    ins: ring.xy.map(() => false), moved: ring.xy.map(() => false) };
+}
+
+export function nudgeStep(w, c, r, step, power, mode = "push", delta = [0, 0]) {
+  if (w.xy.length > 1 && step > 0) {
+    const n = w.xy.length;
+    const segs = w.closed && n > 2 ? n : n - 1;
+    const out = { xy: [], src: [], ins: [], moved: [] };
+    for (let i = 0; i < n; i++) {
+      out.xy.push(w.xy[i]); out.src.push(w.src[i]); out.ins.push(w.ins[i]); out.moved.push(w.moved[i]);
+      if (i >= segs) continue;
+      const a = w.xy[i], b = w.xy[(i + 1) % n];
+      const l = dist(a, b);
+      if (l <= step || closestOnSegment(c, a, b).d >= r) continue;
+      const k = Math.ceil(l / step);
+      for (let j = 1; j < k; j++) {
+        out.xy.push(add(a, mul(sub(b, a), j / k))); out.src.push(null); out.ins.push(true); out.moved.push(false);
+      }
+    }
+    Object.assign(w, out);
+  }
+  let count = 0;
+  for (let i = 0; i < w.xy.length; i++) {
+    const v = w.xy[i];
+    const d = dist(v, c);
+    if (d >= r) continue;
+    let to;
+    if (mode === "smudge") {
+      const f = (1 - (d / r) ** 2) ** 2;
+      to = add(v, mul(delta, power * f));
+    } else {
+      if (d === 0) continue;
+      const rim = add(c, mul(sub(v, c), r / d));
+      to = add(v, mul(sub(rim, v), power));
+    }
+    w.xy[i] = to; w.src[i] = null; w.moved[i] = true; count++;
+  }
+  return count;
+}
+
+// Drop the vertices densification added but the stroke never moved.
+export function finishNudge(w) {
+  const keep = w.xy.map((_, i) => !(w.ins[i] && !w.moved[i]));
+  return { xy: w.xy.filter((_, i) => keep[i]), src: w.src.filter((_, i) => keep[i]) };
 }

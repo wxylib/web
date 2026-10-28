@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import {
   fromGeoJSON, toGeoJSON, snap, constrain, History, toTheta, fromTheta, featureById,
+  nudgeStart, nudgeStep, finishNudge, apply,
 } from "../www/edit-core.js";
 
 const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} != ${b}`);
@@ -137,6 +138,35 @@ test("a batch undoes as one", () => {
   assert.equal(JSON.stringify(toGeoJSON(doc)), before);
   h.redo();
   assert.deepEqual(featureById(doc, "a").rings[0].xy[1], [1011, 999]);
+});
+
+test("a hard nudge densifies, pushes to the rim and keeps the rest as read", () => {
+  const gj = { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [[1000, 0], [1010, 0]] } };
+  const doc = fromGeoJSON(gj);
+  const f = doc.features[0];
+  const w = nudgeStart(f.rings[0]);
+  const c = [1005, -0.5], r = 1;
+  assert.ok(nudgeStep(w, c, r, 0.1, 1) > 0);
+  for (const p of w.xy) assert.ok(Math.hypot(p[0] - c[0], p[1] - c[1]) >= r - 1e-9);
+  const after = finishNudge(w);
+  assert.ok(after.xy.length > 2 && after.xy.length < 30); // only the moved new vertices stay
+  const op = { op: "reshape", fid: f.id, ri: 0, before: { xy: f.rings[0].xy.map((p) => p.slice()), src: f.rings[0].src.slice() }, after };
+  const h = new History(doc);
+  h.record(apply(doc, op));
+  const out = toGeoJSON(doc).features[0].geometry.coordinates;
+  assert.deepEqual(out[0], [1000, 0]);
+  assert.deepEqual(out.at(-1), [1010, 0]);
+  near(Math.max(...out.map((p) => p[1])), 0.5, 1e-9); // the bulge top sits on the rim
+  h.undo();
+  assert.deepEqual(toGeoJSON(doc).features[0].geometry.coordinates, [[1000, 0], [1010, 0]]);
+});
+
+test("a smudge carries vertices with the pointer, fading to the rim", () => {
+  const w = nudgeStart({ closed: false, xy: [[0, 0], [1, 0], [3, 0]], src: [null, null, null] });
+  nudgeStep(w, [0, 0], 2, 0, 1, "smudge", [0, 1]);
+  nearPt(w.xy[0], [0, 1]);
+  near(w.xy[1][1], (1 - 0.25) ** 2);
+  nearPt(w.xy[2], [3, 0]);
 });
 
 console.log(`${n} tests passed`);
