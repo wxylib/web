@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wxylib editing canvas</title>
+<style>
+  :root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --panel: #ffffff; --sel: #e8f0fe;
+          --canvas: #f4f3ef; --feat: #3b6ea5; --fill: rgba(59, 110, 165, 0.12); --accent: #c2410c;
+          --edited: #d97706; --guide: #7c3aed; --snap: #db2777; --grid: rgba(0, 0, 0, 0.12); --draft: #15803d; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161618; --fg: #f2f2f2; --muted: #a1a1a6; --line: #3a3a3c; --panel: #1f1f22; --sel: #23324a;
+            --canvas: #1b1c1f; --feat: #7aa7d9; --fill: rgba(122, 167, 217, 0.14); --accent: #fb923c;
+            --edited: #fbbf24; --guide: #a78bfa; --snap: #f472b6; --grid: rgba(255, 255, 255, 0.10); --draft: #4ade80; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--fg); display: flex; flex-direction: column;
+         font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); }
+  .app { flex: 1; display: flex; min-height: 0; }
+  aside { width: 330px; flex: none; overflow-y: auto; padding: 10px 12px; border-right: 1px solid var(--line); }
+  .view { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #wrap { flex: 1; position: relative; min-height: 300px; background: var(--canvas); }
+  #cv { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; outline: none; }
+  #readout { padding: 4px 10px; border-top: 1px solid var(--line); background: var(--panel);
+             font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre; overflow-x: auto; }
+  @media (max-width: 760px) {
+    .app { flex-direction: column; }
+    aside { width: auto; max-height: 45vh; border-right: 0; border-bottom: 1px solid var(--line); }
+    .view { min-height: 60vh; }
+  }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+  h2:first-child { margin-top: 0; }
+  label { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+  select, input, button { font: inherit; color: var(--fg); background: var(--panel);
+                          border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; min-width: 0; }
+  input[type=checkbox] { padding: 0; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+  .row > input[type=text], .row > input[type=url] { flex: 1; }
+  .modes button { flex: 1; }
+  .modes button.on { background: var(--sel); border-color: var(--muted); }
+  .snaps label { display: inline-flex; margin-right: 8px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 4px 0; }
+  table.cs { border-collapse: collapse; width: 100%; }
+  table.cs td { padding: 2px 3px; }
+  table.cs td:first-child { width: 18px; font-weight: 600; text-align: center; }
+  table.cs input.val { width: 100%; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  table.cs input.val.locked { border-color: var(--guide); background: var(--sel); }
+  .tiny { font-size: 11px; color: var(--muted); }
+  #coords { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+  #coords table { border-collapse: collapse; width: 100%; font: 12px/1.3 ui-monospace, Menlo, Consolas, monospace; }
+  #coords th, #coords td { padding: 2px 4px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  #coords th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; }
+  #coords tr.on { background: var(--sel); }
+  #coords input { width: 100%; border: 0; background: transparent; text-align: right; padding: 1px 2px;
+                  font: inherit; }
+  #coords td.ed { color: var(--edited); }
+  #info { color: var(--muted); font-size: 12px; margin: 4px 0; white-space: pre-line; }
+  #log { font: 11px/1.35 ui-monospace, Menlo, Consolas, monospace; max-height: 140px; overflow: auto;
+         white-space: pre; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; background: var(--panel);
+         color: var(--muted); }
+  #status { color: var(--muted); font-size: 12px; margin-top: 6px; white-space: pre-line; }
+  #status.error { color: #d70015; }
+  kbd { font: 11px ui-monospace, Menlo, Consolas, monospace; border: 1px solid var(--line); border-radius: 4px;
+        padding: 0 3px; background: var(--panel); }
+  details summary { cursor: pointer; color: var(--muted); }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Editing canvas</h1>
+  <p>A plain canvas for drawing and editing vector shapes to the decimal: snapping to vertices, segments,
+    midpoints, intersections and a grid; locked distance, angle, x and y; parallel and perpendicular; a coordinate
+    table beside the drawing; every edit an operation in a log. Untouched vertices are written back exactly as read.</p>
+</header>
+<div class="app">
+  <aside>
+    <h2>Data</h2>
+    <div class="row">
+      <button id="sample">Sample parcels</button>
+      <input id="file" type="file" accept=".geojson,.json,application/geo+json,application/json">
+    </div>
+    <div class="row">
+      <input id="url" type="url" placeholder="GeoJSON URL (CORS)">
+      <button id="load">Load</button>
+    </div>
+    <div id="frame" class="hint"></div>
+
+    <h2>Tool</h2>
+    <div class="row modes">
+      <button data-mode="edit" title="Select and edit vertices (1)">Edit</button>
+      <button data-mode="Point" title="Draw points (2)">Point</button>
+      <button data-mode="LineString" title="Draw a line (3)">Line</button>
+      <button data-mode="Polygon" title="Draw a polygon (4)">Polygon</button>
+    </div>
+    <div class="row">
+      <button id="undo" title="Ctrl+Z">Undo</button>
+      <button id="redo" title="Ctrl+Shift+Z">Redo</button>
+      <button id="fit" title="F">Fit</button>
+    </div>
+
+    <h2>Snapping <span class="tiny">(<kbd>S</kbd> toggles)</span></h2>
+    <div class="snaps">
+      <label><input type="checkbox" id="snapOn" checked> on</label>
+      <label><input type="checkbox" id="sVertex" checked> vertex</label>
+      <label><input type="checkbox" id="sSegment" checked> segment</label>
+      <label><input type="checkbox" id="sMiddle" checked> middle</label>
+      <label><input type="checkbox" id="sInter" checked> intersection</label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="sGrid"> grid every</label>
+      <input id="gridStep" type="number" value="1" min="0" step="any" style="width:80px">
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="topo" checked> move shared vertices together</label>
+    </div>
+    <div class="row">
+      <label>tolerance <input id="tol" type="number" value="12" min="1" max="50" style="width:56px"> px</label>
+    </div>
+    <div class="row">
+      <label>bearings every <select id="bearing">
+        <option value="0">off</option><option value="5">5</option><option value="15">15</option>
+        <option value="30">30</option><option value="45">45</option><option value="90">90</option>
+      </select> deg</label>
+      <label><input type="checkbox" id="bearingRel"> relative</label>
+    </div>
+
+    <h2>Constraints</h2>
+    <table class="cs">
+      <tr><td>d</td><td><input class="val" id="cd" type="text" placeholder="distance" autocomplete="off"></td>
+        <td><input type="checkbox" id="ld" title="lock"></td><td></td></tr>
+      <tr><td>a</td><td><input class="val" id="ca" type="text" placeholder="angle" autocomplete="off"></td>
+        <td><input type="checkbox" id="la" title="lock"></td>
+        <td><label class="tiny"><input type="checkbox" id="ra"> rel</label></td></tr>
+      <tr><td>x</td><td><input class="val" id="cx" type="text" placeholder="x" autocomplete="off"></td>
+        <td><input type="checkbox" id="lx" title="lock"></td>
+        <td><label class="tiny"><input type="checkbox" id="rx"> rel</label></td></tr>
+      <tr><td>y</td><td><input class="val" id="cy" type="text" placeholder="y" autocomplete="off"></td>
+        <td><input type="checkbox" id="ly" title="lock"></td>
+        <td><label class="tiny"><input type="checkbox" id="ry"> rel</label></td></tr>
+    </table>
+    <div class="row">
+      <label>angles <select id="conv"><option value="math">ccw from east</option>
+        <option value="bearing">bearing, cw from north</option></select></label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="keep"> keep locks after each vertex</label>
+    </div>
+    <div class="row">
+      <button id="perp" title="P, then click a segment">Perpendicular</button>
+      <button id="para" title="P twice, then click a segment">Parallel</button>
+      <button id="unlock" title="Esc">Unlock all</button>
+    </div>
+    <p class="hint">Type <kbd>D</kbd>, <kbd>A</kbd>, <kbd>X</kbd> or <kbd>Y</kbd>, a value, then <kbd>Enter</kbd>
+      to lock it; <kbd>Shift</kbd> with the letter toggles relative. Relative x and y count from the previous vertex,
+      a relative angle turns from the previous segment.</p>
+
+    <h2>Selected feature</h2>
+    <div id="info">Nothing selected.</div>
+    <div id="coords" hidden></div>
+
+    <h2>Edits</h2>
+    <div id="log"></div>
+    <div class="row">
+      <button id="saveGeo">Download GeoJSON</button>
+      <button id="saveLog">Download edit log</button>
+    </div>
+    <div id="status"></div>
+
+    <details>
+      <summary>Keys and mouse</summary>
+      <p class="hint">
+        <kbd>1</kbd> to <kbd>4</kbd> tools. Drag with the right or middle button, or hold <kbd>Space</kbd>, to pan;
+        wheel to zoom. <kbd>F</kbd> fits the data.<br>
+        Edit: click a feature to select it, drag a vertex to move it, drag a midpoint marker or double-click a
+        segment to insert a vertex, <kbd>Delete</kbd> removes the selected vertex (or the feature when no vertex is
+        selected).<br>
+        Draw: click to add vertices, <kbd>Backspace</kbd> drops the last, <kbd>Enter</kbd> or a click on the first
+        vertex finishes, <kbd>Esc</kbd> cancels.<br>
+        <kbd>P</kbd> perpendicular, <kbd>P</kbd> again parallel, then click a segment: the angle locks to it.
+        <kbd>B</kbd> toggles bearing steps. <kbd>Ctrl+Z</kbd> undo, <kbd>Ctrl+Shift+Z</kbd> redo.
+      </p>
+    </details>
+  </aside>
+  <div class="view">
+    <div id="wrap"><canvas id="cv" tabindex="0"></canvas></div>
+    <div id="readout"> </div>
+  </div>
+</div>
+<script type="module" src="edit.js"></script>
+</body>
+</html>

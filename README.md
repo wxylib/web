@@ -121,6 +121,53 @@ No basemap tiles in the screenshot for the same reason. Big polygons are
 costly: Overture division areas put whole countries in a row group, and a
 city view of them reads about 170 MB of geometry.
 
+## An editing canvas
+
+`www/edit.html` is a canvas for drawing and editing vector shapes with the
+control CAD gives: every vertex placed exactly where it is meant to go,
+by snapping, by typed values or by geometric constraint. It is a
+prototype for design musing m18 (wxylib/design), plain JavaScript with no
+libraries, and it does not use the wasm module.
+
+- Snapping to vertices, segments, midpoints, intersections and a grid,
+  in a pixel tolerance, with a glyph for each kind.
+- Constraints on the next vertex, relative to the previous one: distance
+  (`D`), angle (`A`, counter-clockwise from east or a bearing), x and y
+  (`X`, `Y`, absolute or relative); bearing steps; perpendicular or
+  parallel to a picked segment (`P`). Constraints combine: an angle lock
+  and a segment snap land on their crossing, a distance lock and an x
+  lock on the circle's crossing.
+- Edit: drag vertices, drag a midpoint to insert one, delete, and move
+  vertices two features share together. Draw points, lines and polygons.
+- A coordinate table beside the drawing, editable to full precision.
+- Every edit is an operation in a log (move, insert, delete, add,
+  remove), undone and redone in order and downloadable as JSON lines.
+- GeoJSON in and out. Projected data is edited in its own coordinates;
+  longitude and latitude in a local metric plane about the data's
+  centre. Vertices no edit touched are written back exactly as read.
+
+![Dragging a corner two parcels share, with its distance from the previous
+corner locked at 42 m](docs/img/edit-drag.jpg)
+
+A line from a parcel corner, perpendicular to the road (the angle lock
+picked from the road with `P`), ending exactly where it meets the road
+(segment snap and angle lock combined):
+
+![Drawing a line perpendicular to a road](docs/img/edit-perp.jpg)
+
+The engine (`www/edit-core.js`: geometry, snapping, constraints, the
+operation log) has no DOM and is tested with node
+(`node scripts/edit-core-test.mjs`, also in CI); `www/edit.js` is the
+canvas and the panels. The sample is synthetic (six parcels, a road, a
+creek and four trees on a projected grid), so the page works offline;
+`?url=` or the file box loads any GeoJSON.
+
+Not yet: a basemap or raster underlay, a real CRS for the edit frame,
+attribute editing, splitting, offsetting and the other shape operations,
+construction guides, and any store for the edits beyond downloading
+them. Musing m18 sets out which of these come next and where each
+belongs.
+
 ## What is in it
 
 - `src/fetch.rs`: an async-tiff reader over the browser's `fetch` with
@@ -145,6 +192,7 @@ city view of them reads about 170 MB of geometry.
 - `www/index.html`: the landing page, listing the examples.
 - `www/s2.html`, `www/s2.js`: Sentinel-2 on a web map.
 - `www/vector.html`, `www/vector.js`, `www/wkb.js`: GeoParquet queried in the browser.
+- `www/edit.html`, `www/edit.js`, `www/edit-core.js`: the editing canvas.
 - `www/cog.html`, `www/cog.js`: one COG, any projection. Colouring is in JavaScript (percentile stretch; a
   sea and land ramp when values straddle zero, viridis otherwise, RGB for
   three bands). While dragging it warps at half size with nearest
