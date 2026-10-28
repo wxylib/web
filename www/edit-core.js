@@ -149,7 +149,7 @@ export function reframe(doc, frame) {
   for (const f of doc.features) {
     for (const r of f.rings) {
       r.xy = r.xy.map((p, i) => frame.fwd(r.src[i] || old.inv(p)));
-      r._bb = null; r._curves = null;
+      r._bb = null; r._curves = null; r._x = null;
     }
   }
   doc.frame = frame;
@@ -319,7 +319,70 @@ export function snap(doc, p, tol, opts, skip = () => false, skipSeg = () => fals
 
 // Drop the cached bboxes of a feature's rings after an edit.
 export function touch(f) {
-  for (const r of f.rings) { r._bb = null; r._curves = null; }
+  for (const r of f.rings) { r._bb = null; r._curves = null; r._x = null; }
+}
+
+// ---- simple rings ---------------------------------------------------------------------
+
+// True when segments ab and cd cross at a point interior to both: a
+// shared endpoint or a collinear touch is not a crossing.
+export function crosses(a, b, c, d) {
+  const o1 = cross(sub(b, a), sub(c, a)), o2 = cross(sub(b, a), sub(d, a));
+  const o3 = cross(sub(d, c), sub(a, c)), o4 = cross(sub(d, c), sub(b, c));
+  return o1 * o2 < 0 && o3 * o4 < 0;
+}
+
+// Where the rings cross themselves or each other: [{ ri, i, rj, j, at }]
+// for segment i of ring ri crossing segment j of ring rj. A polygon
+// with any is invalid; a line with any is valid but not simple. Pairs
+// are pruned by bounding box; brute force within that.
+export function crossings(rings) {
+  const segs = [];
+  rings.forEach((r, ri) => {
+    const xy = r.xy, n = xy.length, m = r.closed && n > 2 ? n : n - 1;
+    for (let i = 0; i < m; i++) {
+      const a = xy[i], b = xy[(i + 1) % n];
+      segs.push({ ri, i, a, b, x0: Math.min(a[0], b[0]), x1: Math.max(a[0], b[0]),
+        y0: Math.min(a[1], b[1]), y1: Math.max(a[1], b[1]) });
+    }
+  });
+  segs.sort((p, q) => p.x0 - q.x0);
+  const out = [];
+  for (let k = 0; k < segs.length; k++) {
+    const p = segs[k];
+    for (let l = k + 1; l < segs.length && segs[l].x0 <= p.x1; l++) {
+      const q = segs[l];
+      if (q.y0 > p.y1 || q.y1 < p.y0 || !crosses(p.a, p.b, q.a, q.b)) continue;
+      out.push({ ri: p.ri, i: p.i, rj: q.ri, j: q.i, at: segmentIntersection(p.a, p.b, q.a, q.b) });
+    }
+  }
+  return out;
+}
+
+// crossings() of a feature, cached until the feature is touched.
+export function featureCrossings(f) {
+  const r0 = f.rings[0];
+  if (!r0) return [];
+  return r0._x || (r0._x = crossings(f.rings));
+}
+
+// Would vertex i of ring w, moved to p, make one of its two segments
+// cross a segment of any ring in rings (w among them)?
+function movesCross(rings, w, i, p) {
+  const n = w.xy.length;
+  const nb = [];
+  if (i > 0 || (w.closed && n > 2)) nb.push(w.xy[(i - 1 + n) % n]);
+  if (i < n - 1 || (w.closed && n > 2)) nb.push(w.xy[(i + 1) % n]);
+  for (const q of nb) {
+    for (const r of rings) {
+      const xy = r.xy, m = xy.length, segs = r.closed && m > 2 ? m : m - 1;
+      for (let j = 0; j < segs; j++) {
+        if (r === w && (j === i || (j + 1) % m === i)) continue;
+        if (crosses(p, q, xy[j], xy[(j + 1) % m])) return true;
+      }
+    }
+  }
+  return false;
 }
 
 // The drawn path of each segment of a ring: [a, b] for straight grid
@@ -541,7 +604,7 @@ export class History {
   }
   // The log as JSON lines, frame coordinates, without cached fields.
   log() {
-    return this.done.map((o) => JSON.stringify(o, (k, v) => (k === "_bb" ? undefined : v))).join("\n");
+    return this.done.map((o) => JSON.stringify(o, (k, v) => (k[0] === "_" ? undefined : v))).join("\n");
   }
 }
 
@@ -568,13 +631,16 @@ export function newFeature(doc, type, xy) {
 // toward the rim (power 1 is a hard ball, less is softer); "smudge"
 // carries them along with the pointer's motion delta, weighted by a
 // smooth falloff from the centre. w is a working ring { xy, src, ins,
-// moved } that finishNudge() turns back into a plain one.
+// moved } that finishNudge() turns back into a plain one. keep, when
+// given, is the feature's working rings (w among them): no vertex is
+// moved so that its segments cross another, so the stroke cannot make
+// a simple ring self-intersecting.
 export function nudgeStart(ring) {
   return { closed: ring.closed, xy: ring.xy.map((p) => p.slice()), src: ring.src.slice(),
     ins: ring.xy.map(() => false), moved: ring.xy.map(() => false) };
 }
 
-export function nudgeStep(w, c, r, step, power, mode = "push", delta = [0, 0]) {
+export function nudgeStep(w, c, r, step, power, mode = "push", delta = [0, 0], keep = null) {
   if (w.xy.length > 1 && step > 0) {
     const n = w.xy.length;
     const segs = w.closed && n > 2 ? n : n - 1;
@@ -605,6 +671,17 @@ export function nudgeStep(w, c, r, step, power, mode = "push", delta = [0, 0]) {
       if (d === 0) continue;
       const rim = add(c, mul(sub(v, c), r / d));
       to = add(v, mul(sub(rim, v), power));
+    }
+    if (keep && movesCross(keep, w, i, to) && !movesCross(keep, w, i, v)) {
+      // keep the rings simple: go as far as the move stays clear of
+      // every other segment, which stops the vertex at the obstacle
+      let lo = 0, hi = 1;
+      for (let it = 0; it < 12; it++) {
+        const t = (lo + hi) / 2;
+        if (movesCross(keep, w, i, add(v, mul(sub(to, v), t)))) hi = t; else lo = t;
+      }
+      if (lo === 0) continue;
+      to = add(v, mul(sub(to, v), lo));
     }
     w.xy[i] = to; w.src[i] = null; w.moved[i] = true; count++;
   }

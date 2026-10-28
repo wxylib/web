@@ -5,7 +5,7 @@ import {
   fromGeoJSON, toGeoJSON, featureById, docBbox, snap, constrain, prevDirection, segments,
   History, canDelete, newFeature, closestOnSegment, pointInRing, ringArea, ringLength,
   dist, fromTheta, add, mul, sub, touch, apply, nudgeStart, nudgeStep, finishNudge,
-  makeFrame, reframe, segmentPaths, bboxOf,
+  makeFrame, reframe, segmentPaths, bboxOf, featureCrossings,
 } from "./edit-core.js";
 import { makeGeo, direct, inverse } from "./edit-geo.js";
 import { transects, cover, clip, lawnmower, repeat } from "./edit-pattern.js";
@@ -733,7 +733,7 @@ function createPattern() {
 // The brush size and the densify spacing are in screen pixels, so the
 // same stroke traces finer detail the further in the view is zoomed.
 function nudgeOpts(shift) {
-  return { r: (+$("nSize").value || 30) * S.view.scale, step: (+$("nStep").value || 4) * S.view.scale,
+  return { r: (+$("nSize").value || 16) * S.view.scale, step: (+$("nStep").value || 4) * S.view.scale,
     power: Math.max(0, Math.min(1, +$("nPower").value)), mode: shift ? ($("nMode").value === "push" ? "smudge" : "push") : $("nMode").value };
 }
 
@@ -744,7 +744,7 @@ function nudge(s, shift) {
   const f = featureById(S.doc, d.fid);
   const delta = sub(c, d.last);
   d.w.forEach((w, ri) => {
-    nudgeStep(w, c, o.r, o.step, o.power, o.mode, delta);
+    nudgeStep(w, c, o.r, o.step, o.power, o.mode, delta, $("nKeep").checked ? d.w : null);
     f.rings[ri].xy = w.xy; f.rings[ri].src = w.src; // live while the stroke lasts
   });
   touch(f);
@@ -770,7 +770,7 @@ function endNudge(d) {
 
 function drawBrush(c) {
   if (!S.mouse) return;
-  const r = +$("nSize").value || 30;
+  const r = +$("nSize").value || 16;
   const [x, y] = S.mouse;
   const g = ctx.createRadialGradient(x, y, 0, x, y, r);
   g.addColorStop(0, "rgba(219, 39, 119, 0.22)");
@@ -814,7 +814,7 @@ function deleteSelected() {
     S.hist.run({ op: "delete", fid: f.id, ri: S.sel.ri, vi: S.sel.vi });
     S.sel = { fid: f.id, ri: null, vi: null };
   } else {
-    S.hist.run({ op: "remove", feature: JSON.parse(JSON.stringify(f, (k, v) => (k === "_bb" ? undefined : v))) });
+    S.hist.run({ op: "remove", feature: JSON.parse(JSON.stringify(f, (k, v) => (k[0] === "_" ? undefined : v))) });
     S.sel = null;
   }
   panels(); draw();
@@ -931,7 +931,7 @@ function previewRing(fid, ri, r) {
 function draw() {
   const c = { canvas: css("--canvas"), feat: css("--feat"), fill: css("--fill"), accent: css("--accent"),
     edited: css("--edited"), guide: css("--guide"), snap: css("--snap"), grid: css("--grid"), draft: css("--draft"),
-    fg: css("--fg"), muted: css("--muted") };
+    fg: css("--fg"), muted: css("--muted"), bad: css("--bad") };
   ctx.fillStyle = c.canvas;
   ctx.fillRect(0, 0, S.w, S.h);
   if (!S.doc) { readout(); return; }
@@ -973,6 +973,23 @@ function draw() {
       });
     }
   }
+
+  // where a polygon crosses itself (invalid), or the selected line does
+  // (valid, not simple): a red ring at each crossing, nothing enforced
+  ctx.save();
+  ctx.strokeStyle = c.bad; ctx.lineWidth = 2;
+  for (const f of S.doc.features) {
+    if (!(f.type.endsWith("Polygon") || (f.type.endsWith("LineString") && S.sel && S.sel.fid === f.id))) continue;
+    for (const x of featureCrossings(f)) {
+      if (!x.at) continue;
+      const s = toScreen(x.at);
+      ctx.beginPath(); ctx.arc(s[0], s[1], 6, 0, 2 * Math.PI);
+      ctx.moveTo(s[0] - 4, s[1] - 4); ctx.lineTo(s[0] + 4, s[1] + 4);
+      ctx.moveTo(s[0] + 4, s[1] - 4); ctx.lineTo(s[0] - 4, s[1] + 4);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
 
   // vertices and midpoints of the selected feature
   if (S.sel) {
@@ -1124,6 +1141,8 @@ function panels() {
     let m = "";
     if (f.type.endsWith("Polygon")) m = `area ${fmt(Math.abs(f.rings.reduce((s, r, i) => s + (i && r.part === f.rings[i - 1].part ? -Math.abs(ringArea(r.xy)) : Math.abs(ringArea(r.xy))), 0)), 2)}`;
     else if (f.type.endsWith("LineString")) m = `length ${fmt(f.rings.reduce((s, r) => s + ringLength(r), 0), 3)}`;
+    const nx = f.type === "Point" || f.type === "MultiPoint" ? 0 : featureCrossings(f).length;
+    if (nx) m += `${m ? ", " : ""}${nx} crossing${nx > 1 ? "s" : ""} (${f.type.endsWith("Polygon") ? "invalid" : "not simple"})`;
     const props = Object.entries(f.props || {}).map(([k, v]) => `${k}: ${v}`).join(", ");
     info.textContent = `${f.id} (${f.type}), ${nv} vertices, ${ne} edited${m ? ", " + m : ""}${props ? "\n" + props : ""}`;
     coordTable(f);

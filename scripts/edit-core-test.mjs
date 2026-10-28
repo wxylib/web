@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import {
   fromGeoJSON, toGeoJSON, snap, constrain, History, toTheta, fromTheta, featureById,
-  nudgeStart, nudgeStep, finishNudge, apply,
+  nudgeStart, nudgeStep, finishNudge, apply, crossings,
 } from "../www/edit-core.js";
 import { inverse, direct, makeGeo } from "../www/edit-geo.js";
 import { transects, cover, clip, lawnmower, repeat } from "../www/edit-pattern.js";
@@ -169,6 +169,23 @@ test("a smudge carries vertices with the pointer, fading to the rim", () => {
   nearPt(w.xy[0], [0, 1]);
   near(w.xy[1][1], (1 - 0.25) ** 2);
   nearPt(w.xy[2], [3, 0]);
+});
+
+test("crossings are found, and a nudge that keeps rings simple stops at the other edge", () => {
+  assert.equal(crossings([{ closed: true, xy: [[0, 0], [2, 0], [0, 2], [2, 2]] }]).length, 1); // a bow tie
+  assert.equal(crossings([{ closed: true, xy: [[0, 0], [2, 0], [2, 2], [0, 2]] }]).length, 0);
+  // a C shape: two arms with a gap between y = 1 and y = 2
+  const ring = () => ({ closed: true, xy: [[0, 0], [10, 0], [10, 1], [1, 1], [1, 2], [10, 2], [10, 3], [0, 3]], src: Array(8).fill(null) });
+  const smudge = (keep) => {
+    const w = nudgeStart(ring());
+    // the ball reaches the lower wall only, and carries it 2 up
+    nudgeStep(w, [5, 1], 0.9, 0.1, 1, "smudge", [0, 2], keep ? [w] : null);
+    return w;
+  };
+  assert.ok(crossings([smudge(false)]).length > 0); // pushed through the upper arm
+  const w = smudge(true);
+  assert.equal(crossings([w]).length, 0);
+  assert.ok(Math.max(...w.xy.filter((p) => p[0] > 2 && p[0] < 9 && p[1] < 2).map((p) => p[1])) > 1.9); // it moved, up to the wall
 });
 
 test("Vincenty: Flinders Peak to Buninyong", () => {
