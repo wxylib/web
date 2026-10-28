@@ -238,12 +238,6 @@ dependencies = [
 
 [[package]]
 name = "crs-definitions"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5229c5b63bdc8e24d60e5c4b6115fbb4d11a8978661b4ecc57d6068ddb073983"
-
-[[package]]
-name = "crs-definitions"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed764c927c2a19ec1cb85deb88e93560872c04653b0e9e63fbdf6a8edf968bcb"
@@ -1020,25 +1014,11 @@ dependencies = [
 
 [[package]]
 name = "proj4rs"
-version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a9a8e6a70c71f11595fa32f9128ebe56f1d986ad380db858799640a1039a0e2"
-dependencies = [
- "console_log",
- "crs-definitions 0.4.0",
- "js-sys",
- "thiserror",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "proj4rs"
 version = "0.2.1"
 source = "git+https://github.com/3liz/proj4rs?rev=764671bd352a15dfbc68ccc8ca5bc2c699935520#764671bd352a15dfbc68ccc8ca5bc2c699935520"
 dependencies = [
  "console_log",
- "crs-definitions 0.6.0",
+ "crs-definitions",
  "js-sys",
  "thiserror",
  "wasm-bindgen",
@@ -1317,7 +1297,7 @@ version = "0.1.2"
 source = "git+https://github.com/hypertidy/rwarp?rev=4f1ab196e3e270626e4fcc649444b9dfe87de59e#4f1ab196e3e270626e4fcc649444b9dfe87de59e"
 dependencies = [
  "controlledburn",
- "proj4rs 0.2.1",
+ "proj4rs",
  "vaster",
 ]
 
@@ -2070,7 +2050,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 [[package]]
 name = "wxy-domain"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=cb17137109b1fc1be2fbeda9a430484530bdd64e#cb17137109b1fc1be2fbeda9a430484530bdd64e"
+source = "git+https://github.com/wxylib/core?rev=b62e173251a182e0d3f3785a8b95142f47b70ffd#b62e173251a182e0d3f3785a8b95142f47b70ffd"
 dependencies = [
  "vaster",
 ]
@@ -2078,12 +2058,12 @@ dependencies = [
 [[package]]
 name = "wxy-resample"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=cb17137109b1fc1be2fbeda9a430484530bdd64e#cb17137109b1fc1be2fbeda9a430484530bdd64e"
+source = "git+https://github.com/wxylib/core?rev=b62e173251a182e0d3f3785a8b95142f47b70ffd#b62e173251a182e0d3f3785a8b95142f47b70ffd"
 
 [[package]]
 name = "wxy-source"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=cb17137109b1fc1be2fbeda9a430484530bdd64e#cb17137109b1fc1be2fbeda9a430484530bdd64e"
+source = "git+https://github.com/wxylib/core?rev=b62e173251a182e0d3f3785a8b95142f47b70ffd#b62e173251a182e0d3f3785a8b95142f47b70ffd"
 dependencies = [
  "async-trait",
  "futures",
@@ -2094,7 +2074,7 @@ dependencies = [
 [[package]]
 name = "wxy-tiff"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=cb17137109b1fc1be2fbeda9a430484530bdd64e#cb17137109b1fc1be2fbeda9a430484530bdd64e"
+source = "git+https://github.com/wxylib/core?rev=b62e173251a182e0d3f3785a8b95142f47b70ffd#b62e173251a182e0d3f3785a8b95142f47b70ffd"
 dependencies = [
  "async-tiff",
  "async-trait",
@@ -2107,10 +2087,10 @@ dependencies = [
 [[package]]
 name = "wxy-warp"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=cb17137109b1fc1be2fbeda9a430484530bdd64e#cb17137109b1fc1be2fbeda9a430484530bdd64e"
+source = "git+https://github.com/wxylib/core?rev=b62e173251a182e0d3f3785a8b95142f47b70ffd#b62e173251a182e0d3f3785a8b95142f47b70ffd"
 dependencies = [
  "controlledburn",
- "proj4rs 0.1.10",
+ "proj4rs",
  "rwarp",
  "serde",
  "wxy-domain",
