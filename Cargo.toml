@@ -13,12 +13,12 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # wxylib/core pinned by git rev; bump together.
-wxy-domain = { git = "https://github.com/wxylib/core", rev = "2752c6b9f37c4c114d9356e8411a9235e89e3902" }
-wxy-source = { git = "https://github.com/wxylib/core", rev = "2752c6b9f37c4c114d9356e8411a9235e89e3902" }
-wxy-tiff = { git = "https://github.com/wxylib/core", rev = "2752c6b9f37c4c114d9356e8411a9235e89e3902" }
-wxy-warp = { git = "https://github.com/wxylib/core", rev = "2752c6b9f37c4c114d9356e8411a9235e89e3902" }
+wxy-domain = { git = "https://github.com/wxylib/core", rev = "29c52692b8f1d00cbc072c218bddcb76c4e3594e" }
+wxy-source = { git = "https://github.com/wxylib/core", rev = "29c52692b8f1d00cbc072c218bddcb76c4e3594e" }
+wxy-tiff = { git = "https://github.com/wxylib/core", rev = "29c52692b8f1d00cbc072c218bddcb76c4e3594e" }
+wxy-warp = { git = "https://github.com/wxylib/core", rev = "29c52692b8f1d00cbc072c218bddcb76c4e3594e" }
 # the same rwarp wxy-warp pins, for CRS transforms of the source outline
-rwarp = { git = "https://github.com/hypertidy/rwarp", rev = "c42d130b3adf19ebcc577050c513a33750b43a8b", default-features = false, features = ["proj4rs"] }
+rwarp = { version = "0.3.0", default-features = false, features = ["proj4rs"] }
 # same version wxy-tiff uses, for the AsyncFileReader trait
 async-tiff = { version = "0.4.0", default-features = false }
 async-trait = "0.1.89"
