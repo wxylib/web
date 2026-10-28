@@ -14,7 +14,8 @@ pub struct View {
 
 impl View {
     /// `extent` is `[xmin, xmax, ymin, ymax]` in `crs`; `resampling` is
-    /// `"near"`, `"bilinear"` or `"cubic"`.
+    /// `"near"`, `"bilinear"`, `"cubic"`, `"lanczos"`, `"average"` or
+    /// `"mode"`.
     pub fn new(
         crs: &str,
         extent: &[f64],
@@ -33,6 +34,9 @@ impl View {
             "near" | "nearest" => ResampleAlg::NearestNeighbour,
             "bilinear" => ResampleAlg::Bilinear,
             "cubic" => ResampleAlg::Cubic,
+            "lanczos" => ResampleAlg::Lanczos,
+            "average" => ResampleAlg::Average,
+            "mode" => ResampleAlg::Mode,
             other => return Err(format!("unknown resampling '{other}'")),
         };
         Ok(Self {
@@ -251,7 +255,7 @@ mod tests {
     #[test]
     fn bad_view() {
         assert!(View::new("EPSG:3031", &[0.0, 1.0], 10, 10, "near").is_err());
-        assert!(View::new("EPSG:3031", &[0.0, 1.0, 0.0, 1.0], 10, 10, "lanczos").is_err());
+        assert!(View::new("EPSG:3031", &[0.0, 1.0, 0.0, 1.0], 10, 10, "sinc").is_err());
     }
 }
 

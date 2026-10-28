@@ -89,7 +89,8 @@ mod bindings {
 
         /// Warp to a `width` by `height` grid in `crs` covering `extent`
         /// (`[xmin, xmax, ymin, ymax]`), with resampling `"near"`,
-        /// `"bilinear"` or `"cubic"`. Resolves to an object with `values`
+        /// `"bilinear"`, `"cubic"`, `"lanczos"`, `"average"` or `"mode"`.
+        /// Resolves to an object with `values`
         /// (a `Float32Array`, band by band, row by row, `NaN` where nothing
         /// maps or the source is nodata), `bands`, `level` (0 is full
         /// resolution, then overviews), and `requests` and `bytes` (range
