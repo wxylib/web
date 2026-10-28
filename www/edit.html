@@ -93,6 +93,40 @@
     </div>
     <div id="frame" class="hint"></div>
 
+    <h2>Frame and ground</h2>
+    <div class="row">
+      <label>data CRS <input id="srcCrs" type="text" placeholder="unknown" style="width:150px" autocomplete="off"></label>
+    </div>
+    <div class="row">
+      <label>edit CRS <input id="editCrs" type="text" placeholder="as the data" style="width:150px" autocomplete="off"></label>
+      <button id="utm" title="The UTM zone at the data's centre">UTM</button>
+      <button id="applyFrame">Apply</button>
+    </div>
+    <p class="hint">EPSG codes or proj strings (proj4rs, in wasm). Edits happen in the edit CRS; longitude and latitude
+      with no edit CRS get a local plane. Vertices you have not touched are still written back exactly as read.</p>
+    <div class="row">
+      <label>distances <select id="measure"><option value="grid">on the grid</option>
+        <option value="ground">on the ellipsoid</option></select></label>
+    </div>
+    <div class="row">
+      <label>north <select id="north"><option value="grid">grid north</option>
+        <option value="true">true north</option></select></label>
+    </div>
+    <div class="row">
+      <label>edges <select id="edges"><option value="grid">straight on the grid</option>
+        <option value="geodesic">geodesics</option></select></label>
+    </div>
+    <p class="hint">Ellipsoid distances use the point scale factor (exact geodesic when angle and distance are both
+      locked); true north applies the grid convergence. Geodesic edges are drawn and snapped as the curve between the
+      vertices. The readout shows ground distance, true azimuth, k and convergence.</p>
+    <div class="row">
+      <input id="cogUrl" type="url" placeholder="underlay COG URL (CORS)">
+      <button id="loadCog">Underlay</button>
+    </div>
+    <div class="row">
+      <label>opacity <input id="opacity" type="range" min="0" max="1" step="0.05" value="0.85"></label>
+    </div>
+
     <h2>Tool</h2>
     <div class="row modes">
       <button data-mode="edit" title="Select and edit vertices (1)">Edit</button>

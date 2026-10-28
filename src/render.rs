@@ -201,6 +201,20 @@ pub fn info(ds: &TiffDataset) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn transform_lonlat_to_utm_and_back() {
+        let t = Transform::new("EPSG:4326", "EPSG:32755").unwrap();
+        // on the zone's central meridian: easting is the false easting
+        let f = t.forward(&[147.0, -42.0, 147.3257, -42.8826]);
+        assert!((f[0] - 500_000.0).abs() < 1e-6, "x = {}", f[0]);
+        assert!((f[1] - 5_350_224.0).abs() < 10.0, "y = {}", f[1]);
+        let b = t.inverse(&f);
+        for (u, v) in b.iter().zip([147.0, -42.0, 147.3257, -42.8826]) {
+            assert!((u - v).abs() < 1e-9, "{u} != {v}");
+        }
+        assert!(t.forward(&[f64::NAN, 0.0])[0].is_nan());
+    }
+
     /// wxylib/fixtures checked out next to this repo, or `WXY_FIXTURES`.
     fn fixture(name: &str) -> Option<std::path::PathBuf> {
         let root = std::env::var("WXY_FIXTURES").unwrap_or_else(|_| "../fixtures".into());
@@ -239,4 +253,40 @@ mod tests {
         assert!(View::new("EPSG:3031", &[0.0, 1.0], 10, 10, "near").is_err());
         assert!(View::new("EPSG:3031", &[0.0, 1.0, 0.0, 1.0], 10, 10, "lanczos").is_err());
     }
+}
+
+/// A pair of CRS transforms between `src` and `dst`, for positions the
+/// page works with outside a warp (the editing canvas's frame).
+pub struct Transform {
+    to_dst: Box<dyn rwarp::crs::CrsTransform>,
+    to_src: Box<dyn rwarp::crs::CrsTransform>,
+}
+
+impl Transform {
+    pub fn new(src: &str, dst: &str) -> Result<Self, String> {
+        let (to_src, to_dst) = rwarp::crs::crs_pair(src, dst)?;
+        Ok(Self { to_dst, to_src })
+    }
+
+    /// Interleaved `x, y` pairs from `src` to `dst`; `NaN` where a point
+    /// does not transform.
+    pub fn forward(&self, xy: &[f64]) -> Vec<f64> {
+        apply(&*self.to_dst, xy)
+    }
+
+    /// Interleaved `x, y` pairs from `dst` back to `src`.
+    pub fn inverse(&self, xy: &[f64]) -> Vec<f64> {
+        apply(&*self.to_src, xy)
+    }
+}
+
+fn apply(t: &dyn rwarp::crs::CrsTransform, xy: &[f64]) -> Vec<f64> {
+    let mut out = Vec::with_capacity(xy.len());
+    for p in xy.chunks_exact(2) {
+        match t.convert(p[0], p[1]) {
+            Some((x, y)) => out.extend([x, y]),
+            None => out.extend([f64::NAN, f64::NAN]),
+        }
+    }
+    out
 }

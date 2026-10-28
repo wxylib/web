@@ -127,7 +127,8 @@ city view of them reads about 170 MB of geometry.
 control CAD gives: every vertex placed exactly where it is meant to go,
 by snapping, by typed values or by geometric constraint. It is a
 prototype for design musing m18 (wxylib/design), plain JavaScript with no
-libraries, and it does not use the wasm module.
+libraries; the wasm module supplies CRS transforms and the underlay, and
+without it the page still edits in data coordinates or a local plane.
 
 - Snapping to vertices, segments, midpoints, intersections and a grid,
   in a pixel tolerance, with a glyph for each kind.
@@ -161,19 +162,56 @@ picked from the road with `P`), ending exactly where it meets the road
 
 ![Drawing a line perpendicular to a road](docs/img/edit-perp.jpg)
 
+### The frame meets the ground
+
+Edits happen in a plane, the edit frame: the data CRS and the edit CRS
+(EPSG codes or proj strings, proj4rs in wasm through a `Transform`
+class) set it, and a UTM button picks the zone at the data's centre.
+Longitude and latitude with no edit CRS get a local plane. Changing the
+frame keeps the edits made so far; vertices never touched are still
+written back exactly as read.
+
+With a CRS the grid and the ground can differ, and the canvas says by
+how much: the readout gives grid distance and angle beside the ground
+(ellipsoid) distance and true azimuth, and the point scale factor `k`
+and grid convergence at the pointer. Three switches put that into the
+drawing:
+
+- distances on the grid or on the ellipsoid (a locked 50 m is 50 m on
+  the ground: the scale factor applied, or the exact geodesic when angle
+  and distance are both locked);
+- north as grid north or true north (a locked bearing or bearing steps
+  are true azimuths, the convergence applied);
+- edges straight on the grid or geodesics: each segment drawn, snapped
+  to and split at its middle as the geodesic between its vertices
+  (WGS84, Vincenty), with the straight chords dashed for comparison.
+
+A COG can be laid under the drawing: `wxy-warp` warps it straight into
+the edit frame for each view, whatever the frame's CRS, so imagery and
+edits share one plane.
+
+![Sample parcels over the Sentinel-2 Hobart scene in its own UTM grid: a
+line locked at true azimuth 45, its ground length and the scale factor
+in the readout](docs/img/edit-underlay.jpg)
+
+![A route from Hobart to Casey to Dumont d'Urville edited on south polar
+stereographic: the edges are geodesics, the dashed chords are the straight
+grid lines](docs/img/edit-geodesic.jpg)
+
 The nudge brush pushing a bend into the creek:
 
 ![A nudge stroke pushing a bend into a line](docs/img/edit-nudge.jpg)
 
 The engine (`www/edit-core.js`: geometry, snapping, constraints, the
-operation log) has no DOM and is tested with node
+operation log) and `www/edit-geo.js` (geodesics, convergence, scale
+factor) have no DOM and are tested with node
 (`node scripts/edit-core-test.mjs`, also in CI); `www/edit.js` is the
 canvas and the panels. The sample is synthetic (six parcels, a road, a
-creek and four trees on a projected grid), so the page works offline;
+creek and four trees, in UTM zone 55 south over Hobart), so the page
+works offline;
 `?url=` or the file box loads any GeoJSON.
 
-Not yet: a basemap or raster underlay, a real CRS for the edit frame,
-attribute editing, splitting, offsetting and the other shape operations,
+Not yet: attribute editing, splitting, offsetting and the other shape operations,
 construction guides, and any store for the edits beyond downloading
 them. Musing m18 sets out which of these come next and where each
 belongs.
@@ -186,7 +224,8 @@ belongs.
 - `src/render.rs`: the view (CRS, extent, size, resampling), the overview
   choice and the warp, as `f32` planes with `NaN` for nothing. No
   JavaScript here, so it is tested natively against wxylib/fixtures.
-- `src/lib.rs`: the wasm surface, one class:
+- `src/lib.rs`: the wasm surface, `Transform` (a proj4rs pair with
+  `forward` and `inverse` on interleaved coordinates) and `Cog`:
 
   ```js
   import init, { Cog } from "./pkg/wxy_web.js";
@@ -202,7 +241,7 @@ belongs.
 - `www/index.html`: the landing page, listing the examples.
 - `www/s2.html`, `www/s2.js`: Sentinel-2 on a web map.
 - `www/vector.html`, `www/vector.js`, `www/wkb.js`: GeoParquet queried in the browser.
-- `www/edit.html`, `www/edit.js`, `www/edit-core.js`: the editing canvas.
+- `www/edit.html`, `www/edit.js`, `www/edit-core.js`, `www/edit-geo.js`: the editing canvas.
 - `www/cog.html`, `www/cog.js`: one COG, any projection. Colouring is in JavaScript (percentile stretch; a
   sea and land ramp when values straddle zero, viridis otherwise, RGB for
   three bands). While dragging it warps at half size with nearest

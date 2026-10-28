@@ -5,9 +5,11 @@
 //! target grid: the canvas. Rendering is warping to a screen grid, with
 //! the same code the `wxy warp` command runs.
 //!
-//! The wasm surface is one class, [`Cog`]: `Cog.open(url)`, then
+//! The wasm surface is two classes. [`Cog`]: `Cog.open(url)`, then
 //! `cog.warp(crs, extent, width, height, resampling)` as often as the view
-//! changes. CRS work is proj4rs (EPSG codes and proj strings, no PROJ).
+//! changes. `Transform`: `new Transform(src, dst)`, then `forward` and
+//! `inverse` on interleaved coordinates. CRS work is proj4rs (EPSG codes
+//! and proj strings, no PROJ).
 //!
 //! [`render`] holds the part that does not touch JavaScript, so it is
 //! tested natively against the wxylib/fixtures COGs.
@@ -27,6 +29,28 @@ mod bindings {
 
     use crate::fetch::FetchReader;
     use crate::render::{self, View};
+
+    /// A pair of CRS transforms (proj4rs): EPSG codes or proj strings.
+    #[wasm_bindgen]
+    pub struct Transform(render::Transform);
+
+    #[wasm_bindgen]
+    impl Transform {
+        #[wasm_bindgen(constructor)]
+        pub fn new(src: String, dst: String) -> Result<Transform, JsError> {
+            render::Transform::new(&src, &dst).map(Transform).map_err(|e| JsError::new(&e))
+        }
+
+        /// Interleaved `x, y` pairs from `src` to `dst` (`NaN` on failure).
+        pub fn forward(&self, xy: Vec<f64>) -> Vec<f64> {
+            self.0.forward(&xy)
+        }
+
+        /// Interleaved `x, y` pairs from `dst` to `src`.
+        pub fn inverse(&self, xy: Vec<f64>) -> Vec<f64> {
+            self.0.inverse(&xy)
+        }
+    }
 
     /// An opened COG.
     #[wasm_bindgen]

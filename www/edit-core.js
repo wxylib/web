@@ -8,6 +8,8 @@
 // beside the frame ones; a vertex no operation has touched is written
 // back exactly as it was read.
 
+import { direct } from "./edit-geo.js";
+
 // ---- the edit frame -------------------------------------------------------
 
 const R = 6371008.8; // mean Earth radius, metres
@@ -22,12 +24,14 @@ export function makeFrame(kind, lon0 = 0, lat0 = 0) {
   }
   const k = Math.cos((lat0 * Math.PI) / 180);
   const d = (Math.PI / 180) * R;
-  return {
+  const local = {
     kind, lon0, lat0,
     label: `local plane at ${lon0.toFixed(4)}, ${lat0.toFixed(4)} (metres, approximate)`,
     fwd: (p) => [(p[0] - lon0) * d * k, (p[1] - lat0) * d],
     inv: (p) => [lon0 + p[0] / (d * k), lat0 + p[1] / d],
   };
+  local.toLL = local.inv; local.fromLL = local.fwd; // the source is longitude and latitude
+  return local;
 }
 
 // ---- the document -----------------------------------------------------------
@@ -135,6 +139,20 @@ export function bboxOf(pts) {
     if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
   }
   return [x0, y0, x1, y1];
+}
+
+// Move a document into another frame. Untouched vertices are recomputed
+// from their source coordinates; edited ones go back through the old
+// frame and forward through the new one.
+export function reframe(doc, frame) {
+  const old = doc.frame;
+  for (const f of doc.features) {
+    for (const r of f.rings) {
+      r.xy = r.xy.map((p, i) => frame.fwd(r.src[i] || old.inv(p)));
+      r._bb = null; r._curves = null;
+    }
+  }
+  doc.frame = frame;
 }
 
 export function docBbox(doc) {
@@ -261,18 +279,24 @@ export function snap(doc, p, tol, opts, skip = () => false, skipSeg = () => fals
     const bb = ring._bb || (ring._bb = bboxOf(xy));
     if (p[0] < bb[0] - tol || p[0] > bb[2] + tol || p[1] < bb[1] - tol || p[1] > bb[3] + tol) return;
     if (opts.vertex) xy.forEach((v, i) => { if (!skip(fid, ri, i)) consider(v, "vertex", { fid, ri, vi: i }); });
-    for (const [i, j] of segments(ring)) {
-      if (skipSeg(fid, ri, i, j)) continue;
-      const a = xy[i], b = xy[j];
-      const c = closestOnSegment(p, a, b);
-      if (c.d > tol) continue;
-      near.push([a, b]);
-      if (opts.segment) consider(c.pt, "segment", { fid, ri, seg: [a, b] });
-      if (opts.middle) consider(mul(add(a, b), 0.5), "middle", { fid, ri, seg: [a, b] });
-    }
+    const segs = segments(ring);
+    const paths = segmentPaths(ring, opts);
+    segs.forEach(([i, j], k) => {
+      if (skipSeg(fid, ri, i, j)) return;
+      const path = paths[k];
+      let best = null;
+      for (let m = 0; m + 1 < path.length; m++) {
+        const c = closestOnSegment(p, path[m], path[m + 1]);
+        if (c.d <= tol) near.push([path[m], path[m + 1]]);
+        if (!best || c.d < best.d) best = { ...c, seg: [path[m], path[m + 1]] };
+      }
+      if (!best || best.d > tol) return;
+      if (opts.segment) consider(best.pt, "segment", { fid, ri, seg: best.seg });
+      if (opts.middle) consider(opts.mid ? opts.mid(xy[i], xy[j]) : mul(add(xy[i], xy[j]), 0.5), "middle", { fid, ri, seg: best.seg });
+    });
   };
   for (const f of doc.features) f.rings.forEach((r, ri) => visit(f.id, ri, r));
-  extra.forEach((r, ri) => { r._bb = null; visit("draft", ri, r); });
+  extra.forEach((r, ri) => { r._bb = null; r._curves = null; visit("draft", ri, r); });
   if (opts.intersection) {
     for (let i = 0; i < near.length; i++) {
       for (let j = i + 1; j < near.length; j++) {
@@ -295,7 +319,20 @@ export function snap(doc, p, tol, opts, skip = () => false, skipSeg = () => fals
 
 // Drop the cached bboxes of a feature's rings after an edit.
 export function touch(f) {
-  for (const r of f.rings) r._bb = null;
+  for (const r of f.rings) { r._bb = null; r._curves = null; }
+}
+
+// The drawn path of each segment of a ring: [a, b] for straight grid
+// edges, or opts.curve(a, b) (a geodesic, say) cached on the ring under
+// opts.curveKey.
+export function segmentPaths(ring, opts = {}) {
+  const segs = segments(ring);
+  if (!opts.curve) return segs.map(([i, j]) => [ring.xy[i], ring.xy[j]]);
+  if (!ring._curves || ring._curvesKey !== opts.curveKey) {
+    ring._curves = segs.map(([i, j]) => opts.curve(ring.xy[i], ring.xy[j]));
+    ring._curvesKey = opts.curveKey;
+  }
+  return ring._curves;
 }
 
 // ---- constraints ---------------------------------------------------------------
@@ -306,8 +343,16 @@ export function touch(f) {
 // direction of the segment before it, or null. cursor is the (possibly
 // snapped) pointer; snapSeg the segment it snapped to, if any. Returns
 // the constrained point and the guides to draw.
-export function constrain(cursor, ref, prevTheta, cs, snapSeg = null) {
+//
+// With geo (edit-geo.js makeGeo) the grid meets the ground: cs.north
+// "true" reads absolute angles and bearing steps as true azimuths (grid
+// convergence applied at ref), and cs.measure "ground" reads distances
+// on the ellipsoid (the point scale factor at ref; exact geodesic when
+// both angle and distance are locked).
+export function constrain(cursor, ref, prevTheta, cs, snapSeg = null, geo = null) {
   const conv = cs.conv || "math";
+  const trueN = !!(geo && cs.north === "true" && ref);
+  const ground = !!(geo && cs.measure === "ground" && ref);
   const guides = [];
   const X = cs.x.on ? (cs.x.rel && ref ? ref[0] + cs.x.val : cs.x.val) : null;
   const Y = cs.y.on ? (cs.y.rel && ref ? ref[1] + cs.y.val : cs.y.val) : null;
@@ -320,9 +365,16 @@ export function constrain(cursor, ref, prevTheta, cs, snapSeg = null) {
   }
 
   // a direction from the angle lock, or from bearing snapping
-  let theta = null;
+  let theta = null, az = null;
   if (cs.a.on) {
-    theta = cs.a.rel && prevTheta != null ? relTheta(cs.a.val, prevTheta, conv) : toTheta(cs.a.val, conv);
+    if (cs.a.rel && prevTheta != null) theta = relTheta(cs.a.val, prevTheta, conv);
+    else if (trueN) { az = conv === "bearing" ? cs.a.val : 90 - cs.a.val; theta = geo.gridTheta(ref, az); }
+    else theta = toTheta(cs.a.val, conv);
+  } else if (cs.bearingStep > 0 && dist(cursor, ref) > 0 && trueN && !(cs.bearingRel && prevTheta != null)) {
+    const raw = geo.trueAz(ref, Math.atan2(cursor[1] - ref[1], cursor[0] - ref[0]));
+    const base = conv === "bearing" ? 0 : 90; // north, or east, true
+    az = base + Math.round((raw - base) / cs.bearingStep) * cs.bearingStep;
+    theta = geo.gridTheta(ref, az);
   } else if (cs.bearingStep > 0 && dist(cursor, ref) > 0) {
     const raw = Math.atan2(cursor[1] - ref[1], cursor[0] - ref[0]);
     const base = cs.bearingRel && prevTheta != null ? prevTheta : (conv === "bearing" ? Math.PI / 2 : 0);
@@ -334,7 +386,10 @@ export function constrain(cursor, ref, prevTheta, cs, snapSeg = null) {
     const dir = [Math.cos(theta), Math.sin(theta)];
     guides.push({ kind: "ray", o: ref, dir });
     let pt;
-    if (cs.d.on) pt = add(ref, mul(dir, cs.d.val));
+    if (cs.d.on && ground) {
+      const ll = geo.toLL(ref);
+      pt = geo.fromLL(direct(ll[0], ll[1], az ?? geo.trueAz(ref, theta), cs.d.val));
+    } else if (cs.d.on) pt = add(ref, mul(dir, cs.d.val));
     else if (X != null && Math.abs(dir[0]) > 1e-12) pt = add(ref, mul(dir, (X - ref[0]) / dir[0]));
     else if (Y != null && Math.abs(dir[1]) > 1e-12) pt = add(ref, mul(dir, (Y - ref[1]) / dir[1]));
     else if (snapSeg) pt = lineLine(ref, dir, snapSeg[0], snapSeg[1]);
@@ -343,7 +398,7 @@ export function constrain(cursor, ref, prevTheta, cs, snapSeg = null) {
   }
 
   if (cs.d.on) {
-    const r = cs.d.val;
+    const r = ground ? cs.d.val * geo.scale(ref, Math.atan2(cursor[1] - ref[1], cursor[0] - ref[0]) || 0) : cs.d.val;
     guides.push({ kind: "circle", c: ref, r });
     let cands = [];
     if (X != null) cands = lineCircle([X, 0], [0, 1], ref, r);

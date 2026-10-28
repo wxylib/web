@@ -5,7 +5,17 @@ import {
   fromGeoJSON, toGeoJSON, featureById, docBbox, snap, constrain, prevDirection, segments,
   History, canDelete, newFeature, closestOnSegment, pointInRing, ringArea, ringLength,
   dist, fromTheta, add, mul, sub, touch, apply, nudgeStart, nudgeStep, finishNudge,
+  makeFrame, reframe, segmentPaths, bboxOf,
 } from "./edit-core.js";
+import { makeGeo, direct, inverse } from "./edit-geo.js";
+
+// wxylib in wasm (proj4rs transforms, COG warp), when it has been built
+// into ./pkg; without it the canvas still edits, in data coordinates or
+// a local plane.
+let wasm = null;
+const wasmReady = import("./pkg/wxy_web.js")
+  .then(async (m) => { await m.default(); wasm = m; return m; })
+  .catch((e) => { console.warn("wxy_web wasm not available:", e); return null; });
 
 const $ = (id) => document.getElementById(id);
 const cv = $("cv");
@@ -53,14 +63,87 @@ function fit() {
 
 // ---- data ----------------------------------------------------------------------
 
-function setDoc(gj, name) {
+async function setDoc(gj, name, srcCrs = null) {
   S.doc = fromGeoJSON(gj);
   S.hist = new History(S.doc);
   S.sel = null; S.draft = []; S.hit = null;
-  $("frame").textContent = `${name}: ${S.doc.features.length} features. Edit frame: ${S.doc.frame.label}.`;
+  S.name = name;
+  $("srcCrs").value = srcCrs || (S.doc.frame.kind === "local" ? "EPSG:4326" : "");
   status("");
-  fit();
+  await wasmReady;
+  applyFrame(true);
   panels();
+}
+
+// ---- the frame: which plane edits happen in, and how it meets the ground ----
+
+const isLonLat = (crs) => /^(EPSG:4326|EPSG:4283|EPSG:7844|OGC:CRS84|\+proj=(longlat|lonlat|latlong))/i.test(crs.trim());
+const two = (v) => [v[0], v[1]];
+
+function sourceCentre() {
+  const pts = S.doc.features.flatMap((f) => f.rings.flatMap((r) => r.src.filter(Boolean)));
+  const [x0, y0, x1, y1] = bboxOf(pts);
+  return [(x0 + x1) / 2, (y0 + y1) / 2];
+}
+
+// Build the frame from the data CRS and the edit CRS fields and move the
+// document into it. Edits made so far travel with it.
+function applyFrame(refit = false) {
+  if (!S.doc) return;
+  const src = $("srcCrs").value.trim(), dst = $("editCrs").value.trim();
+  let frame, geo = null;
+  try {
+    if (src && dst) {
+      if (!wasm) throw new Error("the wasm module is not built, so only the local plane is available");
+      const tf = new wasm.Transform(src, dst), tl = new wasm.Transform(dst, "EPSG:4326");
+      frame = { kind: "crs", crs: dst, label: dst,
+        fwd: (p) => two(tf.forward([p[0], p[1]])), inv: (p) => two(tf.inverse([p[0], p[1]])) };
+      geo = makeGeo((p) => two(tl.forward([p[0], p[1]])), (ll) => two(tl.inverse([ll[0], ll[1]])));
+    } else if (src && isLonLat(src)) {
+      const [lon0, lat0] = sourceCentre();
+      frame = makeFrame("local", lon0, lat0);
+      frame.crs = `+proj=eqc +lat_ts=${lat0} +lat_0=${lat0} +lon_0=${lon0} +R=6371008.8 +units=m +no_defs`;
+      geo = makeGeo(frame.toLL, frame.fromLL);
+    } else {
+      frame = makeFrame("native");
+      if (src && wasm) {
+        const tl = new wasm.Transform(src, "EPSG:4326");
+        frame.crs = src; frame.label = `data coordinates, ${src}`;
+        geo = makeGeo((p) => two(tl.forward([p[0], p[1]])), (ll) => two(tl.inverse([ll[0], ll[1]])));
+      }
+    }
+  } catch (e) {
+    status("Frame: " + (e.message || e), true);
+    return;
+  }
+  const before = S.doc.frame;
+  reframe(S.doc, frame);
+  // the log's coordinates are in the old frame: the edits stay, the log starts again
+  if (S.hist.done.length && before.crs !== frame.crs) {
+    S.hist = new History(S.doc);
+    status("New frame: the edits made so far are kept; undo and the log start again here.");
+  }
+  S.geo = geo;
+  $("frame").textContent = `${S.name}: ${S.doc.features.length} features. Edit frame: ${frame.label}.` +
+    (geo ? "" : " No CRS, so ground measures are off.");
+  for (const id of ["measure", "north", "edges"]) $(id).disabled = !geo;
+  if (refit || before.kind !== frame.kind || before.crs !== frame.crs) fit();
+  S.under = null; requestUnderlay();
+  draw();
+}
+
+// The UTM zone at the data's centre.
+function utmZone() {
+  if (!S.doc) return;
+  const src = $("srcCrs").value.trim();
+  let ll = sourceCentre();
+  if (!isLonLat(src)) {
+    if (!S.geo) { status("Set the data CRS first.", true); return; }
+    ll = S.geo.toLL(S.doc.frame.fwd(ll));
+  }
+  const zone = Math.floor((ll[0] + 180) / 6) + 1;
+  $("editCrs").value = `EPSG:${ll[1] < 0 ? 327 : 326}${String(zone).padStart(2, "0")}`;
+  applyFrame();
 }
 
 // Six parcels on a block turned 7 degrees, a road, a creek and four
@@ -125,8 +208,32 @@ function snapOpts() {
   return {
     vertex: $("sVertex").checked, segment: $("sSegment").checked, middle: $("sMiddle").checked,
     intersection: $("sInter").checked, grid: $("sGrid").checked, gridStep: +$("gridStep").value || 0,
+    ...edgeOpts(),
   };
 }
+
+// Geodesic edges: each segment drawn and snapped as the geodesic between
+// its vertices, densified to about 4 pixels.
+function edgeOpts() {
+  if (!S.geo || $("edges").value !== "geodesic") return {};
+  const geo = S.geo, maxLen = 4 * S.view.scale;
+  return {
+    curve: (a, b) => geo.curve(a, b, maxLen),
+    curveKey: "g" + maxLen.toPrecision(2),
+    mid: (a, b) => {
+      const p = geo.toLL(a), q = geo.toLL(b), g = inverse(p[0], p[1], q[0], q[1]);
+      return g ? geo.fromLL(direct(p[0], p[1], g.az1, g.s / 2)) : mul(add(a, b), 0.5);
+    },
+  };
+}
+
+// The middle of a segment: of the geodesic when edges are geodesics.
+function midOf(a, b) {
+  const eo = edgeOpts();
+  return eo.mid ? eo.mid(a, b) : mul(add(a, b), 0.5);
+}
+
+function touchAll() { if (S.doc) for (const f of S.doc.features) touch(f); }
 
 function constraints() {
   const num = (id) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : 0; };
@@ -137,6 +244,7 @@ function constraints() {
     x: { on: $("lx").checked, val: num("cx"), rel: $("rx").checked },
     y: { on: $("ly").checked, val: num("cy"), rel: $("ry").checked },
     bearingStep: +$("bearing").value, bearingRel: $("bearingRel").checked,
+    measure: $("measure").value, north: $("north").value,
   };
 }
 
@@ -195,7 +303,7 @@ function pointer(sx, sy) {
   let pt = cursor, guides = [];
   if (placing) {
     const { ref, prev } = reference();
-    const c = constrain(cursor, ref, prev, constraints(), sn && sn.seg ? sn.seg : null);
+    const c = constrain(cursor, ref, prev, constraints(), sn && sn.seg ? sn.seg : null, S.geo);
     pt = c.pt; guides = c.guides;
   }
   S.hit = { snap: sn, pt, guides, raw: w };
@@ -240,7 +348,7 @@ function hitMid(s) {
   for (let ri = 0; ri < f.rings.length; ri++) {
     const r = f.rings[ri];
     for (const [a, b] of segments(r)) {
-      const m = toScreen(mul(add(r.xy[a], r.xy[b]), 0.5));
+      const m = toScreen(midOf(r.xy[a], r.xy[b]));
       if (Math.hypot(m[0] - s[0], m[1] - s[1]) <= 7) return { ri, a, b };
     }
   }
@@ -251,13 +359,18 @@ function hitSegment(s, fid = null) {
   const w = toWorld(s);
   const tol = 8 * S.view.scale;
   let best = null;
+  const eo = edgeOpts();
   for (const f of S.doc.features) {
     if (fid && f.id !== fid) continue;
     f.rings.forEach((r, ri) => {
-      for (const [a, b] of segments(r)) {
-        const c = closestOnSegment(w, r.xy[a], r.xy[b]);
-        if (c.d <= tol && (!best || c.d < best.d)) best = { fid: f.id, ri, a, b, pt: c.pt, d: c.d, seg: [r.xy[a], r.xy[b]] };
-      }
+      const paths = segmentPaths(r, eo);
+      segments(r).forEach(([a, b], k) => {
+        const path = paths[k];
+        for (let m = 0; m + 1 < path.length; m++) {
+          const c = closestOnSegment(w, path[m], path[m + 1]);
+          if (c.d <= tol && (!best || c.d < best.d)) best = { fid: f.id, ri, a, b, pt: c.pt, d: c.d, seg: [path[m], path[m + 1]] };
+        }
+      });
     });
   }
   return best;
@@ -426,6 +539,82 @@ cv.addEventListener("drop", (e) => {
   const f = e.dataTransfer.files[0];
   if (f) loadFile(f);
 });
+
+// ---- the underlay: a COG warped into the edit frame ---------------------------------------
+
+// Rendering is warping to a screen grid, and here the screen grid is the
+// edit frame: the COG is warped by wxy-warp straight into the frame's
+// CRS for the view, whatever that CRS is.
+async function loadCog(url) {
+  if (!url) { S.cog = null; S.under = null; draw(); return; }
+  await wasmReady;
+  if (!wasm) { status("The wasm module is not built, so no underlay.", true); return; }
+  status("Opening " + url);
+  try {
+    S.cog = await wasm.Cog.open(url);
+    S.under = null;
+    status("");
+    requestUnderlay();
+  } catch (e) {
+    status("Could not open the COG: " + (e.message || e), true);
+  }
+}
+
+let underTimer = null, underSeq = 0;
+function requestUnderlay() {
+  if (!S.cog || !S.doc || !S.doc.frame.crs) return;
+  clearTimeout(underTimer);
+  underTimer = setTimeout(warpUnderlay, 150);
+}
+
+async function warpUnderlay() {
+  const crs = S.doc.frame.crs;
+  const w = Math.max(1, Math.round(S.w)), h = Math.max(1, Math.round(S.h));
+  const [x0, y1] = toWorld([0, 0]), [x1, y0] = toWorld([S.w, S.h]);
+  const seq = ++underSeq;
+  try {
+    const out = await S.cog.warp(crs, [x0, x1, y0, y1], w, h, "bilinear");
+    if (seq !== underSeq) return; // a newer view is on its way
+    const img = new ImageData(w, h);
+    const n = w * h, v = out.values, rgb = out.bands >= 3;
+    let lo = 0, hi = 255;
+    if (!rgb || Math.max(...v.subarray(0, Math.min(v.length, 4096)).filter(Number.isFinite)) > 255) {
+      const sample = [];
+      for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 4000))) if (Number.isFinite(v[i])) sample.push(v[i]);
+      sample.sort((a, b) => a - b);
+      lo = sample[Math.floor(sample.length * 0.02)] ?? 0; hi = sample[Math.floor(sample.length * 0.98)] ?? 1;
+    }
+    const sc = (x) => Math.max(0, Math.min(255, ((x - lo) / (hi - lo || 1)) * 255));
+    for (let i = 0; i < n; i++) {
+      const r = v[i], g = rgb ? v[n + i] : r, b = rgb ? v[2 * n + i] : r;
+      if (!Number.isFinite(r)) continue;
+      img.data[4 * i] = sc(r); img.data[4 * i + 1] = sc(g); img.data[4 * i + 2] = sc(b); img.data[4 * i + 3] = 255;
+    }
+    const oc = document.createElement("canvas");
+    oc.width = w; oc.height = h;
+    oc.getContext("2d").putImageData(img, 0, 0);
+    S.under = { canvas: oc, x0, y1, scale: S.view.scale, crs, level: out.level, requests: out.requests, bytes: out.bytes };
+    draw();
+  } catch (e) {
+    status("Underlay: " + (e.message || e), true);
+  }
+}
+
+// Draw the last warp where it belongs in the current view (stretched
+// while a new one is fetched), then ask for a new one if the view moved.
+function drawUnderlay() {
+  const u = S.under;
+  if (u && S.doc.frame.crs === u.crs) {
+    const s = toScreen([u.x0, u.y1]);
+    const k = u.scale / S.view.scale;
+    ctx.save();
+    ctx.globalAlpha = +$("opacity").value;
+    ctx.drawImage(u.canvas, s[0], s[1], u.canvas.width * k, u.canvas.height * k);
+    ctx.restore();
+  }
+  const key = [S.view.cx, S.view.cy, S.view.scale, S.w, S.h, S.doc.frame.crs].join();
+  if (S.cog && key !== S.underKey) { S.underKey = key; requestUnderlay(); }
+}
 
 // ---- the nudge brush ----------------------------------------------------------------------
 
@@ -597,7 +786,18 @@ function setMode(m) {
 
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
-function pathRing(xy, closed) {
+function pathRing(xy, closed, ring = null) {
+  const eo = edgeOpts();
+  if (eo.curve && xy.length > 1) {
+    // a ring object caches its curves; a preview computes them afresh
+    const paths = ring && ring.xy === xy ? segmentPaths(ring, eo) : segmentPaths({ xy, closed }, eo);
+    paths.forEach((path, k) => path.forEach((p, i) => {
+      const s = toScreen(p);
+      if (k === 0 && i === 0) ctx.moveTo(s[0], s[1]); else if (i > 0) ctx.lineTo(s[0], s[1]);
+    }));
+    if (closed) ctx.closePath();
+    return;
+  }
   xy.forEach((p, i) => { const s = toScreen(p); i ? ctx.lineTo(s[0], s[1]) : ctx.moveTo(s[0], s[1]); });
   if (closed) ctx.closePath();
 }
@@ -621,6 +821,7 @@ function draw() {
   ctx.fillStyle = c.canvas;
   ctx.fillRect(0, 0, S.w, S.h);
   if (!S.doc) { readout(); return; }
+  drawUnderlay();
 
   // grid
   const g = +$("gridStep").value;
@@ -642,13 +843,13 @@ function draw() {
     ctx.strokeStyle = on ? c.accent : c.feat;
     if (f.type.endsWith("Polygon")) {
       ctx.beginPath();
-      f.rings.forEach((r, ri) => pathRing(previewRing(f.id, ri, r), true));
+      f.rings.forEach((r, ri) => pathRing(previewRing(f.id, ri, r), true, r));
       ctx.fillStyle = c.fill;
       ctx.fill("evenodd");
       ctx.stroke();
     } else if (f.type.endsWith("LineString")) {
       ctx.beginPath();
-      f.rings.forEach((r, ri) => pathRing(previewRing(f.id, ri, r), false));
+      f.rings.forEach((r, ri) => pathRing(previewRing(f.id, ri, r), false, r));
       ctx.stroke();
     } else {
       f.rings.forEach((r, ri) => {
@@ -662,13 +863,26 @@ function draw() {
   // vertices and midpoints of the selected feature
   if (S.sel) {
     const f = featureById(S.doc, S.sel.fid);
+    if (f && edgeOpts().curve) {
+      // the straight grid chords, faint, against the geodesic edges
+      ctx.save();
+      ctx.strokeStyle = c.muted; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      for (const r of f.rings) {
+        if (r.xy.length < 2) continue;
+        ctx.beginPath();
+        r.xy.forEach((p, i) => { const s = toScreen(p); i ? ctx.lineTo(s[0], s[1]) : ctx.moveTo(s[0], s[1]); });
+        if (r.closed) ctx.closePath();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
     if (f) {
       f.rings.forEach((r, ri) => {
         const xy = previewRing(f.id, ri, r);
         if (S.mode === "edit" && xy.length > 1) {
           ctx.fillStyle = c.muted;
           for (const [a, b] of segments({ xy, closed: r.closed })) {
-            const m = toScreen(mul(add(xy[a], xy[b]), 0.5));
+            const m = toScreen(midOf(xy[a], xy[b]));
             ctx.beginPath(); ctx.arc(m[0], m[1], 2.5, 0, 2 * Math.PI); ctx.fill();
           }
         }
@@ -770,7 +984,12 @@ function readout() {
   if (ref && p) {
     const th = Math.atan2(p[1] - ref[1], p[0] - ref[0]);
     parts.push(`d ${fmt(dist(ref, p))}  a ${fmt(fromTheta(th, $("conv").value), 4)}`);
+    if (S.geo && dist(ref, p) > 0) {
+      const a = S.geo.toLL(ref), b = S.geo.toLL(p), g = inverse(a[0], a[1], b[0], b[1]);
+      if (g) parts.push(`ground ${fmt(g.s)}  true az ${fmt(g.az1, 4)}`);
+    }
   }
+  if (S.geo && p) parts.push(`k ${fmt(S.geo.scale(p), 6)}  conv ${fmt(S.geo.convergence(p), 4)}`);
   if (S.pending) parts.push(`pick a segment: ${S.pending === "perp" ? "perpendicular" : "parallel"}`);
   parts.push(`1 px = ${S.view.scale.toPrecision(3)}`);
   $("readout").textContent = parts.join("   ");
@@ -847,7 +1066,14 @@ $("coords").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target
 
 // ---- wiring --------------------------------------------------------------------------------------------
 
-$("sample").onclick = () => setDoc(sampleParcels(), "sample parcels (synthetic)");
+$("sample").onclick = () => setDoc(sampleParcels(), "sample parcels (synthetic)", "EPSG:32755");
+$("applyFrame").onclick = () => applyFrame();
+$("utm").onclick = utmZone;
+for (const id of ["srcCrs", "editCrs"]) $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") applyFrame(); });
+$("loadCog").onclick = () => loadCog($("cogUrl").value.trim());
+$("cogUrl").addEventListener("keydown", (e) => { if (e.key === "Enter") $("loadCog").click(); });
+$("opacity").oninput = () => draw();
+for (const id of ["measure", "north", "edges"]) $(id).onchange = () => { touchAll(); draw(); };
 $("file").onchange = (e) => e.target.files[0] && loadFile(e.target.files[0]);
 $("load").onclick = () => $("url").value && loadUrl($("url").value.trim());
 $("url").addEventListener("keydown", (e) => { if (e.key === "Enter") $("load").click(); });
@@ -865,7 +1091,7 @@ $("saveLog").onclick = () => S.hist && download("edits.jsonl", S.hist.log() + "\
 new ResizeObserver(resize).observe($("wrap"));
 setMode("edit");
 const q = new URLSearchParams(location.search).get("url");
-if (q) { $("url").value = q; loadUrl(q); } else setDoc(sampleParcels(), "sample parcels (synthetic)");
+if (q) { $("url").value = q; loadUrl(q); } else setDoc(sampleParcels(), "sample parcels (synthetic)", "EPSG:32755");
 
 // for tests and the console
-window.wxyEdit = { S, toScreen, toWorld, toGeoJSON: () => toGeoJSON(S.doc) };
+window.wxyEdit = { S, toScreen, toWorld, toGeoJSON: () => toGeoJSON(S.doc), wasmReady, applyFrame };

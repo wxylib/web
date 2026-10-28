@@ -4,6 +4,7 @@ import {
   fromGeoJSON, toGeoJSON, snap, constrain, History, toTheta, fromTheta, featureById,
   nudgeStart, nudgeStep, finishNudge, apply,
 } from "../www/edit-core.js";
+import { inverse, direct, makeGeo } from "../www/edit-geo.js";
 
 const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} != ${b}`);
 const nearPt = (p, q, tol = 1e-9) => { near(p[0], q[0], tol); near(p[1], q[1], tol); };
@@ -167,6 +168,53 @@ test("a smudge carries vertices with the pointer, fading to the rim", () => {
   nearPt(w.xy[0], [0, 1]);
   near(w.xy[1][1], (1 - 0.25) ** 2);
   nearPt(w.xy[2], [3, 0]);
+});
+
+test("Vincenty: Flinders Peak to Buninyong", () => {
+  const dms = (d, m, s) => Math.sign(d) * (Math.abs(d) + m / 60 + s / 3600);
+  const p = [dms(144, 25, 29.5244), dms(-37, 57, 3.7203)], q = [dms(143, 55, 35.3839), dms(-37, 39, 10.1561)];
+  const g = inverse(p[0], p[1], q[0], q[1]);
+  near(g.s, 54972.271, 1e-3);
+  near(g.az1, dms(306, 52, 5.37), 1e-5);
+  const b = direct(p[0], p[1], g.az1, g.s);
+  near(b[0], q[0], 1e-9); near(b[1], q[1], 1e-9);
+});
+
+// A local plane turned so that true north lies 10 degrees clockwise of
+// grid north: grid north is 10 degrees anticlockwise of true north, a
+// convergence of -10.
+function turnedGeo(turn) {
+  const R = 6371008.8, d = (Math.PI / 180) * R, lat0 = -42, k = Math.cos((lat0 * Math.PI) / 180);
+  const c = Math.cos((turn * Math.PI) / 180), s = Math.sin((turn * Math.PI) / 180);
+  const fromLL = (ll) => { const x = (ll[0] - 147) * d * k, y = (ll[1] - lat0) * d; return [c * x + s * y, -s * x + c * y]; };
+  const toLL = (p) => { const x = c * p[0] - s * p[1], y = s * p[0] + c * p[1]; return [147 + x / (d * k), lat0 + y / d]; };
+  return makeGeo(toLL, fromLL);
+}
+
+test("grid convergence and true-north locks", () => {
+  const geo = turnedGeo(10);
+  near(geo.convergence([0, 0]), -10, 0.05);
+  const cs = cs0();
+  cs.conv = "bearing"; cs.north = "true"; cs.a = { on: true, val: 0, rel: false }; cs.d = { on: true, val: 100 };
+  const { pt } = constrain([0, 50], [0, 0], null, cs, null, geo);
+  near(90 - (Math.atan2(pt[1], pt[0]) * 180) / Math.PI, 10, 0.05); // true north, drawn 10 deg right of grid north
+  cs.measure = "ground";
+  const g = constrain([0, 50], [0, 0], null, cs, null, geo).pt;
+  near(geo.distance([0, 0], g), 100, 1e-6); // exactly 100 m on the ellipsoid
+});
+
+test("snapping follows geodesic edges when asked", () => {
+  const doc = fromGeoJSON({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [[140, -60], [160, -60]] } });
+  const geo = makeGeo(doc.frame.toLL, doc.frame.fromLL);
+  const opts = { segment: true, curve: (a, b) => geo.curve(a, b, 5000), curveKey: "g" };
+  const r = doc.features[0].rings[0];
+  const mid = [(r.xy[0][0] + r.xy[1][0]) / 2, r.xy[0][1]];
+  // the geodesic bows poleward of the straight grid line at mid-span
+  const s = snap(doc, [mid[0], mid[1] - 200000], 300000, opts);
+  // geodesic vertex latitude: tan(lat) = tan(60) / cos(10), about 60.37 S
+  const ym = doc.frame.fromLL([150, -Math.atan(Math.tan(Math.PI / 3) / Math.cos(Math.PI / 18)) * 180 / Math.PI])[1];
+  near(s.pt[1], ym, 200); // on the curve (spherical estimate vs WGS84), about 41 km south of the grid line
+  assert.ok(ym < mid[1] - 40000);
 });
 
 console.log(`${n} tests passed`);
