@@ -146,6 +146,8 @@ without it the page still edits in data coordinates or a local plane.
   `Shift`, smudged along with it; size, spacing and power are set in the
   panel, `[` and `]` resize. New vertices the stroke did not move are
   dropped, and each stroke is one operation.
+- Field patterns (`6`): transects, transects filling a polygon, a
+  lawnmower track and repeats, in ground metres and true azimuths.
 - A coordinate table beside the drawing, editable to full precision.
 - Every edit is an operation in a log (move, insert, delete, add,
   remove), undone and redone in order and downloadable as JSON lines.
@@ -198,13 +200,32 @@ in the readout](docs/img/edit-underlay.jpg)
 stereographic: the edges are geodesics, the dashed chords are the straight
 grid lines](docs/img/edit-geodesic.jpg)
 
+### Field patterns
+
+The pattern tool (`6`) lays out survey work: parallel transects (count,
+spacing, length, azimuth, optionally centred on the origin), transects
+filling a selected polygon and clipped to its edges as drawn, one
+lawnmower track joining them end to end, and a selected feature repeated
+along a direction. Press on the canvas for the origin (snaps apply) and
+drag to set the azimuth and length, then refine the numbers; a dashed
+preview follows every change and `Enter` creates the pattern as one
+undoable step. With a CRS, spacing, length and step are metres on the
+ellipsoid and the azimuth is true: each transect is a geodesic from its
+own start, and each repeated vertex is moved on the ellipsoid, so the
+same tool holds for 5 m quadrat lines on a hillside and 2000 km vessel
+lines south of Tasmania.
+
+![Transects at true azimuth 45 and 5 m spacing filling one parcel as a
+single lawnmower track, and a preview of centred transects clipped to the
+next parcel](docs/img/edit-pattern.jpg)
+
 The nudge brush pushing a bend into the creek:
 
 ![A nudge stroke pushing a bend into a line](docs/img/edit-nudge.jpg)
 
 The engine (`www/edit-core.js`: geometry, snapping, constraints, the
-operation log) and `www/edit-geo.js` (geodesics, convergence, scale
-factor) have no DOM and are tested with node
+operation log), `www/edit-geo.js` (geodesics, convergence, scale
+factor) and `www/edit-pattern.js` (transects, cover, clip, repeat) have no DOM and are tested with node
 (`node scripts/edit-core-test.mjs`, also in CI); `www/edit.js` is the
 canvas and the panels. The sample is synthetic (six parcels, a road, a
 creek and four trees, in UTM zone 55 south over Hobart), so the page

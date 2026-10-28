@@ -8,6 +8,7 @@ import {
   makeFrame, reframe, segmentPaths, bboxOf,
 } from "./edit-core.js";
 import { makeGeo, direct, inverse } from "./edit-geo.js";
+import { transects, cover, clip, lawnmower, repeat } from "./edit-pattern.js";
 
 // wxylib in wasm (proj4rs transforms, COG warp), when it has been built
 // into ./pkg; without it the canvas still edits, in data coordinates or
@@ -425,6 +426,15 @@ cv.addEventListener("mousedown", (e) => {
     pointer(s[0], s[1]); draw();
     return;
   }
+  if (S.mode === "pattern") {
+    pointer(s[0], s[1]);
+    if ($("pKind").value !== "repeat") {
+      S.pat = { origin: S.hit.pt.slice() };
+      S.drag = { kind: "pattern", moved: false };
+    }
+    draw();
+    return;
+  }
   if (S.mode === "nudge") {
     if (!S.sel) {
       const fid = hitFeature(s);
@@ -483,6 +493,7 @@ cv.addEventListener("mousemove", (e) => {
   if (S.mode === "nudge") { S.hit = { snap: null, pt: toWorld(S.mouse), guides: [] }; draw(); return; }
   if (S.drag) S.drag.moved = true;
   pointer(e.offsetX, e.offsetY);
+  if (S.drag && S.drag.kind === "pattern") patternDrag();
   draw();
 });
 
@@ -490,6 +501,7 @@ window.addEventListener("mouseup", () => {
   const d = S.drag;
   S.drag = null;
   if (d && d.kind === "nudge") { endNudge(d); return; }
+  if (d && d.kind === "pattern") { draw(); return; }
   if (!d || d.kind === "pan" || !d.moved || !S.hit) { draw(); return; }
   const to = S.hit.pt.slice();
   if (d.kind === "vertex") {
@@ -614,6 +626,106 @@ function drawUnderlay() {
   }
   const key = [S.view.cx, S.view.cy, S.view.scale, S.w, S.h, S.doc.frame.crs].join();
   if (S.cog && key !== S.underKey) { S.underKey = key; requestUnderlay(); }
+}
+
+// ---- field patterns ----------------------------------------------------------------------------
+
+// Transects, transects filling the selected polygon, a lawnmower track
+// through them, or the selected feature repeated along a direction.
+// Metres on the ellipsoid and true azimuths when the frame has a CRS;
+// frame units and grid bearings when it does not. Press on the canvas
+// to set the origin and drag to set the azimuth and length.
+function patternOpts() {
+  const num = (id, d) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : d; };
+  return { kind: $("pKind").value, count: Math.max(1, Math.round(num("pCount", 5))), spacing: num("pSpacing", 10),
+    length: num("pLength", 100), az: num("pAz", 0), centred: $("pCentred").checked, track: $("pTrack").checked,
+    clip: $("pClip").checked, margin: num("pMargin", 0) };
+}
+
+function patternDrag() {
+  const o = S.pat && S.pat.origin, p = S.hit && S.hit.pt;
+  if (!o || !p || dist(o, p) === 0) return;
+  let az, len;
+  if (S.geo) {
+    const a = S.geo.toLL(o), b = S.geo.toLL(p), g = inverse(a[0], a[1], b[0], b[1]);
+    if (!g) return;
+    az = g.az1; len = g.s;
+  } else {
+    az = ((90 - (Math.atan2(p[1] - o[1], p[0] - o[0]) * 180) / Math.PI) % 360 + 360) % 360;
+    len = dist(o, p);
+  }
+  $("pAz").value = +az.toFixed(4);
+  if ($("pKind").value === "lines") $("pLength").value = +len.toFixed(3);
+}
+
+const selectedPolygon = () => {
+  const f = S.sel && featureById(S.doc, S.sel.fid);
+  return f && f.type.endsWith("Polygon") ? f : null;
+};
+
+// The pattern as new features: [{ type, rings: [{ xy, closed, part }], props }].
+function patternFeatures() {
+  const o = patternOpts();
+  const geo = S.geo;
+  if (o.kind === "repeat") {
+    const f = S.sel && featureById(S.doc, S.sel.fid);
+    if (!f) return [];
+    return repeat(f.rings.map((r) => r.xy), { az: o.az, step: o.spacing, count: o.count }, geo).map((rings, j) => ({
+      type: f.type, props: { ...f.props, copy: j + 1 },
+      rings: rings.map((xy, ri) => ({ xy, closed: f.rings[ri].closed, part: f.rings[ri].part })),
+    }));
+  }
+  if (!S.pat) return [];
+  const poly = selectedPolygon();
+  let lines;
+  if (o.kind === "fill") {
+    if (!poly) return [];
+    lines = cover(S.pat.origin, poly.rings.map((r) => r.xy), { az: o.az, spacing: o.spacing, margin: o.margin + o.spacing }, geo);
+  } else {
+    lines = transects(S.pat.origin, { az: o.az, spacing: o.spacing, length: o.length, count: o.count, centred: o.centred }, geo);
+  }
+  if (poly && (o.kind === "fill" || o.clip)) {
+    // clip along the edges as drawn: a geodesic edge is clipped as its curve
+    const eo = edgeOpts();
+    const rings = poly.rings.map((r) => segmentPaths(r, eo).flatMap((path, k) => (k ? path.slice(1) : path)));
+    lines = lines.flatMap(([a, b]) => clip(eo.curve ? eo.curve(a, b) : [a, b], rings));
+  }
+  const props = { pattern: o.kind === "fill" ? "fill" : "transects", azimuth: o.az, spacing: o.spacing,
+    units: geo ? "metres, true azimuth" : "frame units, grid bearing" };
+  if (o.track && lines.length) return [{ type: "LineString", props: { ...props, track: "lawnmower" }, rings: [{ xy: lawnmower(lines), closed: false, part: 0 }] }];
+  return lines.map((l, i) => ({ type: "LineString", props: { ...props, line: i + 1 }, rings: [{ xy: l, closed: false, part: 0 }] }));
+}
+
+function drawPattern(c) {
+  const feats = patternFeatures();
+  ctx.save();
+  ctx.strokeStyle = c.draft; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+  for (const f of feats) {
+    ctx.beginPath();
+    for (const r of f.rings) {
+      if (r.xy.length === 1) { const s = toScreen(r.xy[0]); ctx.moveTo(s[0] + 4, s[1]); ctx.arc(s[0], s[1], 4, 0, 2 * Math.PI); }
+      else pathRing(r.xy, r.closed);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+  if (S.pat && $("pKind").value !== "repeat") {
+    const s = toScreen(S.pat.origin);
+    ctx.fillStyle = c.draft;
+    ctx.beginPath(); ctx.arc(s[0], s[1], 4, 0, 2 * Math.PI); ctx.fill();
+  }
+  $("pInfo").textContent = feats.length ? `${feats.length} feature${feats.length > 1 ? "s" : ""}, ` +
+    `${feats.reduce((n, f) => n + f.rings.reduce((m, r) => m + r.xy.length, 0), 0)} vertices` : "";
+}
+
+function createPattern() {
+  const feats = patternFeatures();
+  if (!feats.length) { status("Nothing to create: set an origin (or select a feature to repeat).", true); return; }
+  const ops = feats.map((f) => ({ op: "add", feature: { id: "new" + S.doc.next++, type: f.type, props: f.props,
+    rings: f.rings.map((r) => ({ part: r.part, closed: r.closed, xy: r.xy.map((p) => p.slice()), src: r.xy.map(() => null) })) } }));
+  S.hist.run(ops.length > 1 ? { op: "batch", ops } : ops[0]);
+  status(`Created ${feats.length} feature${feats.length > 1 ? "s" : ""}.`);
+  panels(); draw();
 }
 
 // ---- the nudge brush ----------------------------------------------------------------------
@@ -748,6 +860,7 @@ window.addEventListener("keydown", (e) => {
   else if (k === "3") setMode("LineString");
   else if (k === "4") setMode("Polygon");
   else if (k === "5") setMode("nudge");
+  else if (k === "6") setMode("pattern");
   else if (k === "[" || k === "]") {
     const el = $("nSize");
     el.value = Math.max(4, Math.min(200, Math.round((+el.value || 30) * (k === "]" ? 1.25 : 0.8))));
@@ -760,6 +873,7 @@ window.addEventListener("keydown", (e) => {
     S.pending = S.pending === "perp" ? "para" : S.pending === "para" ? null : "perp";
     status(S.pending ? `Click a segment to lock the angle ${S.pending === "perp" ? "perpendicular" : "parallel"} to it.` : "");
   } else if (k === "f") fit();
+  else if (k === "enter" && S.mode === "pattern") createPattern();
   else if (k === "enter") finishDraft();
   else if (k === "escape") {
     if (S.pending) { S.pending = null; status(""); }
@@ -924,6 +1038,7 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(s[0] - 6, s[1]); ctx.lineTo(s[0] + 6, s[1]); ctx.moveTo(s[0], s[1] - 6); ctx.lineTo(s[0], s[1] + 6); ctx.stroke();
   }
   if (S.mode === "nudge") drawBrush(c);
+  if (S.mode === "pattern") drawPattern(c);
   readout();
 }
 
@@ -1068,6 +1183,11 @@ $("coords").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target
 
 $("sample").onclick = () => setDoc(sampleParcels(), "sample parcels (synthetic)", "EPSG:32755");
 $("applyFrame").onclick = () => applyFrame();
+$("pCreate").onclick = createPattern;
+for (const id of ["pKind", "pCount", "pSpacing", "pLength", "pAz", "pCentred", "pTrack", "pClip", "pMargin"]) {
+  $(id).addEventListener("input", () => draw());
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") createPattern(); });
+}
 $("utm").onclick = utmZone;
 for (const id of ["srcCrs", "editCrs"]) $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") applyFrame(); });
 $("loadCog").onclick = () => loadCog($("cogUrl").value.trim());

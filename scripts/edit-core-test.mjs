@@ -5,6 +5,7 @@ import {
   nudgeStart, nudgeStep, finishNudge, apply,
 } from "../www/edit-core.js";
 import { inverse, direct, makeGeo } from "../www/edit-geo.js";
+import { transects, cover, clip, lawnmower, repeat } from "../www/edit-pattern.js";
 
 const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} != ${b}`);
 const nearPt = (p, q, tol = 1e-9) => { near(p[0], q[0], tol); near(p[1], q[1], tol); };
@@ -215,6 +216,33 @@ test("snapping follows geodesic edges when asked", () => {
   const ym = doc.frame.fromLL([150, -Math.atan(Math.tan(Math.PI / 3) / Math.cos(Math.PI / 18)) * 180 / Math.PI])[1];
   near(s.pt[1], ym, 200); // on the curve (spherical estimate vs WGS84), about 41 km south of the grid line
   assert.ok(ym < mid[1] - 40000);
+});
+
+test("transects, cover, clip and a lawnmower track on the grid", () => {
+  const t = transects([0, 0], { az: 0, spacing: 10, length: 100, count: 3 });
+  nearPt(t[2][0], [20, 0], 1e-9); nearPt(t[2][1], [20, 100], 1e-9);
+  const square = [[[0, 0], [50, 0], [50, 30], [0, 30]]];
+  const c = cover([0, 0], square, { az: 0, spacing: 10 });
+  assert.equal(c.length, 6);
+  nearPt(c[5][0], [50, 0], 1e-9); nearPt(c[5][1], [50, 30], 1e-9);
+  const pieces = clip([[5, -10], [5, 40]], square);
+  assert.equal(pieces.length, 1);
+  nearPt(pieces[0][0], [5, 0], 1e-9); nearPt(pieces[0][1], [5, 30], 1e-9);
+  const hole = [[[0, 0], [50, 0], [50, 30], [0, 30]], [[2, 10], [8, 10], [8, 20], [2, 20]]];
+  assert.equal(clip([[5, -10], [5, 40]], hole).length, 2);
+  const lm = lawnmower(t);
+  nearPt(lm[2], [10, 100], 1e-9); nearPt(lm[3], [10, 0], 1e-9);
+});
+
+test("ground transects and repeats keep their metres", () => {
+  const geo = turnedGeo(25);
+  const t = transects([1000, 2000], { az: 30, spacing: 250, length: 5000, count: 4 }, geo);
+  for (let i = 0; i + 1 < t.length; i++) near(geo.distance(t[i][0], t[i + 1][0]), 250, 1e-5); // micrometres: round trips through the frame
+  for (const [a, b] of t) near(geo.distance(a, b), 5000, 1e-6);
+  const g0 = geo.toLL(t[0][0]), g1 = geo.toLL(t[0][1]);
+  near(inverse(g0[0], g0[1], g1[0], g1[1]).az1, 30, 1e-9);
+  const copies = repeat([[[0, 0], [10, 0], [10, 10]]], { az: 90, step: 40, count: 2 }, geo);
+  near(geo.distance([0, 0], copies[1][0][0]), 80, 1e-6);
 });
 
 console.log(`${n} tests passed`);
