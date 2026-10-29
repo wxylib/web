@@ -1304,9 +1304,9 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "rwarp"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "188cb8dca476923b35761be4088f46e812787c17d0c3407c83e7614aca13bb46"
+checksum = "990539d6f3ccc5227217416e306423664d92e0dfed89ad977caf73d4aad4a81b"
 dependencies = [
  "controlledburn",
  "proj4rs",
@@ -2062,7 +2062,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 [[package]]
 name = "wxy-domain"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=29c52692b8f1d00cbc072c218bddcb76c4e3594e#29c52692b8f1d00cbc072c218bddcb76c4e3594e"
+source = "git+https://github.com/wxylib/core?rev=caba7b2ff19cc97dde505eed6fae6145ef9692aa#caba7b2ff19cc97dde505eed6fae6145ef9692aa"
 dependencies = [
  "vaster",
 ]
@@ -2070,7 +2070,7 @@ dependencies = [
 [[package]]
 name = "wxy-source"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=29c52692b8f1d00cbc072c218bddcb76c4e3594e#29c52692b8f1d00cbc072c218bddcb76c4e3594e"
+source = "git+https://github.com/wxylib/core?rev=caba7b2ff19cc97dde505eed6fae6145ef9692aa#caba7b2ff19cc97dde505eed6fae6145ef9692aa"
 dependencies = [
  "async-trait",
  "futures",
@@ -2081,7 +2081,7 @@ dependencies = [
 [[package]]
 name = "wxy-tiff"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=29c52692b8f1d00cbc072c218bddcb76c4e3594e#29c52692b8f1d00cbc072c218bddcb76c4e3594e"
+source = "git+https://github.com/wxylib/core?rev=caba7b2ff19cc97dde505eed6fae6145ef9692aa#caba7b2ff19cc97dde505eed6fae6145ef9692aa"
 dependencies = [
  "async-tiff",
  "async-trait",
@@ -2094,7 +2094,7 @@ dependencies = [
 [[package]]
 name = "wxy-warp"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=29c52692b8f1d00cbc072c218bddcb76c4e3594e#29c52692b8f1d00cbc072c218bddcb76c4e3594e"
+source = "git+https://github.com/wxylib/core?rev=caba7b2ff19cc97dde505eed6fae6145ef9692aa#caba7b2ff19cc97dde505eed6fae6145ef9692aa"
 dependencies = [
  "controlledburn",
  "proj4rs",
