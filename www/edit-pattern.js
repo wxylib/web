@@ -10,12 +10,14 @@ import { pointInRing } from "./edit-core.js";
 const rad = (d) => (d * Math.PI) / 180;
 
 // The point `along` metres in direction az and `across` metres to its
-// right, from origin (frame coordinates in and out).
+// right, from origin (frame coordinates in and out). Across is a
+// geodesic step; along follows the geo's edge model, so transects are
+// loxodromes (constant heading) when geo.line is "rhumb".
 function offset(origin, az, along, across, geo) {
   if (geo) {
     let ll = geo.toLL(origin);
     if (across) ll = direct(ll[0], ll[1], az + (across > 0 ? 90 : -90), Math.abs(across));
-    if (along) ll = direct(ll[0], ll[1], az, along);
+    if (along) ll = geo.lineDirect ? geo.lineDirect(ll, az, along) : direct(ll[0], ll[1], az, along);
     return geo.fromLL(ll);
   }
   const t = rad(90 - az), r = rad(90 - az - 90);
@@ -38,9 +40,9 @@ export function local(origin, az, p, geo) {
 
 // Parallel lines: count of them, spacing apart, each `length` long on
 // azimuth az, starting `start` metres along; line k is k spacings to the
-// right (centred: the set straddles the origin). Each line keeps the
-// azimuth at its own start, so on the ellipsoid long lines are geodesics
-// with a common initial azimuth.
+// right (centred: the set straddles the origin). On the ellipsoid each
+// line is a geodesic with the common azimuth at its own start, or a
+// loxodrome holding that heading throughout (geo.line "rhumb").
 export function transects(origin, { az, spacing, length, count, start = 0, first = 0, centred = false }, geo = null) {
   const out = [];
   for (let i = 0; i < count; i++) {

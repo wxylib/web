@@ -153,6 +153,9 @@ without it the page still edits in data coordinates or a local plane.
   simple), and counted in the feature panel. Nothing is refused.
 - Field patterns (`6`): transects, transects filling a polygon, a
   lawnmower track and repeats, in ground metres and true azimuths.
+- Parametric shapes (`7`): circles, regular polygons, rectangles and
+  arcs through three points, which keep their parameters beside their
+  vertices.
 - A coordinate table beside the drawing, editable to full precision.
 - Every edit is an operation in a log (move, insert, delete, add,
   remove), undone and redone in order and downloadable as JSON lines.
@@ -189,9 +192,13 @@ drawing:
   and distance are both locked);
 - north as grid north or true north (a locked bearing or bearing steps
   are true azimuths, the convergence applied);
-- edges straight on the grid or geodesics: each segment drawn, snapped
-  to and split at its middle as the geodesic between its vertices
-  (WGS84, Vincenty), with the straight chords dashed for comparison.
+- edges straight on the grid, geodesics or loxodromes: each segment
+  drawn, snapped to and split at its middle as the geodesic (WGS84,
+  Vincenty) or the loxodrome (rhumb line, constant heading, the line a
+  vessel steers) between its vertices, with the straight chords dashed
+  for comparison. Locked distances and azimuths, the readout and the
+  field patterns follow the same edges, so transects become constant
+  heading lines when edges are loxodromes.
 
 A COG can be laid under the drawing: `wxy-warp` warps it straight into
 the edit frame for each view, whatever the frame's CRS, so imagery and
@@ -204,6 +211,34 @@ in the readout](docs/img/edit-underlay.jpg)
 ![A route from Hobart to Casey to Dumont d'Urville edited on south polar
 stereographic: the edges are geodesics, the dashed chords are the straight
 grid lines](docs/img/edit-geodesic.jpg)
+
+### Parametric shapes
+
+The shape tool (`7`) draws a circle (press the centre, drag the
+radius), a regular polygon (centre, drag to its first vertex), a
+rectangle (a corner, drag the diagonal, on an axis azimuth from the
+panel) or an arc (click its start, a point on it and its end). Snapping
+applies to every point. With a CRS and distances on the ellipsoid,
+radius, width and height are metres on the ground and azimuths are true,
+each vertex placed by the direct solution on the ellipsoid; otherwise
+they are frame units.
+
+A shape keeps its parameters in the feature's properties (`wxy:shape`,
+with points in the data's coordinates, so it survives a change of frame
+and a GeoJSON round trip) beside the vertices it produced. Selecting it
+shows the parameters as fields: change the radius and the vertices
+follow, as one undoable step. Moving a vertex makes the feature plain
+geometry, and undo brings the shape back; "Make plain geometry" does it
+on purpose. Nothing is held that was not asked for.
+
+![A 12 m circle on the ground, its radius and vertex count editable in the
+panel, with a hexagon, a rectangle on the block's 7 degree axis and an arc
+between two parcel corners](docs/img/edit-shapes.jpg)
+
+![Loxodrome edges in south polar stereographic: Hobart to Casey as a
+rhumb line (3471 km on a steady heading of 221.4 degrees, against 3431 km
+for the geodesic), and transects from Hobart holding a heading of 200
+degrees](docs/img/edit-loxodrome.jpg)
 
 ### Field patterns
 
@@ -236,14 +271,16 @@ ringed; on, each vertex stops at the edge it would have crossed:
 
 The engine (`www/edit-core.js`: geometry, snapping, constraints, the
 operation log, crossings), `www/edit-geo.js` (geodesics, convergence, scale
-factor) and `www/edit-pattern.js` (transects, cover, clip, repeat) have no DOM and are tested with node
+factor, loxodromes), `www/edit-pattern.js` (transects, cover, clip,
+repeat) and `www/edit-shape.js` (parametric shapes) have no DOM and are tested with node
 (`node scripts/edit-core-test.mjs`, also in CI); `www/edit.js` is the
 canvas and the panels. The sample is synthetic (six parcels, a road, a
 creek and four trees, in UTM zone 55 south over Hobart), so the page
 works offline;
 `?url=` or the file box loads any GeoJSON.
 
-Not yet: attribute editing, splitting, offsetting and the other shape operations,
+Not yet: attribute editing, splitting, offsetting, constraints held between
+shapes (a solver),
 construction guides, and any store for the edits beyond downloading
 them. Musing m18 sets out which of these come next and where each
 belongs.
