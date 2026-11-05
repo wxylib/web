@@ -1,0 +1,11 @@
+<!-- A 14 MB FlatGeobuf file read over HTTP. Its spatial index lets the
+     page fetch only the counties in the map view, with range requests. -->
+<OGRVRTDataSource>
+  <OGRVRTLayer name="counties">
+    <SrcDataSource>/vsicurl/https://raw.githubusercontent.com/flatgeobuf/flatgeobuf/d69dc74c898068237fcf98cf3a92f82180b6b3c8/test/data/UScounties.fgb</SrcDataSource>
+    <SrcLayer>US__counties</SrcLayer>
+    <Field name="name" src="NAME"/>
+    <Field name="state" src="STATE"/>
+    <Field name="fips" src="FIPS"/>
+  </OGRVRTLayer>
+</OGRVRTDataSource>

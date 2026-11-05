@@ -1,0 +1,12 @@
+<!-- GeoParquet (WKB geometry), with a spatial filter: only the countries
+     that meet the region are kept (they are not clipped to it). -->
+<OGRVRTDataSource>
+  <OGRVRTLayer name="near_australia">
+    <SrcDataSource relativeToVRT="1">countries.parquet</SrcDataSource>
+    <SrcLayer>countries</SrcLayer>
+    <SrcRegion>POLYGON ((100 -50, 180 -50, 180 0, 100 0, 100 -50))</SrcRegion>
+    <Field name="name" src="NAME"/>
+    <Field name="continent" src="CONTINENT"/>
+    <Field name="population" src="POP_EST" type="Integer64"/>
+  </OGRVRTLayer>
+</OGRVRTDataSource>
