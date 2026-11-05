@@ -1,0 +1,13 @@
+<!-- A GeoJSON file read over HTTP, filtered by an SQL query, with three
+     of its 168 fields kept and renamed. -->
+<OGRVRTDataSource>
+  <OGRVRTLayer name="oceania">
+    <SrcDataSource>/vsicurl/https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_110m_admin_0_countries.geojson</SrcDataSource>
+    <SrcSQL>SELECT * FROM ne_110m_admin_0_countries
+      WHERE CONTINENT = 'Oceania' OR NAME IN ('Indonesia', 'Timor-Leste', 'Antarctica')</SrcSQL>
+    <FID>ISO_N3</FID>
+    <Field name="name" src="NAME" type="String"/>
+    <Field name="iso" src="ISO_A3" type="String"/>
+    <Field name="population" src="POP_EST" type="Integer64"/>
+  </OGRVRTLayer>
+</OGRVRTDataSource>

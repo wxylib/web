@@ -1,0 +1,22 @@
+<!-- Two layers from two CSV files. Points from two columns of numbers;
+     lines from a column of WKT in polar stereographic metres. -->
+<OGRVRTDataSource>
+  <OGRVRTLayer name="stations">
+    <SrcDataSource relativeToVRT="1">stations.csv</SrcDataSource>
+    <SrcLayer>stations</SrcLayer>
+    <GeometryType>wkbPoint</GeometryType>
+    <LayerSRS>WGS84</LayerSRS>
+    <GeometryField encoding="PointFromColumns" x="lon" y="lat"/>
+    <Style>style</Style>
+    <Field name="name" type="String"/>
+    <Field name="operator" type="String"/>
+    <Field name="opened" type="Integer"/>
+  </OGRVRTLayer>
+  <OGRVRTLayer name="routes">
+    <SrcDataSource relativeToVRT="1">routes.csv</SrcDataSource>
+    <SrcLayer>routes</SrcLayer>
+    <GeometryType>wkbLineString</GeometryType>
+    <LayerSRS>EPSG:3031</LayerSRS>
+    <GeometryField encoding="WKT" field="geom_wkt" reportSrcColumn="false"/>
+  </OGRVRTLayer>
+</OGRVRTDataSource>

@@ -1,0 +1,27 @@
+<!-- One layer from two: Australian stations in longitude and latitude,
+     and the others in polar stereographic, warped to longitude and
+     latitude first, since a union layer does not reproject. -->
+<OGRVRTDataSource>
+  <OGRVRTUnionLayer name="all_stations">
+    <SourceLayerFieldName>from</SourceLayerFieldName>
+    <OGRVRTLayer name="australian">
+      <SrcDataSource relativeToVRT="1">stations.csv</SrcDataSource>
+      <SrcSQL>SELECT * FROM stations WHERE operator = 'Australia'</SrcSQL>
+      <LayerSRS>EPSG:4326</LayerSRS>
+      <GeometryField encoding="PointFromColumns" x="lon" y="lat"/>
+      <Field name="name"/>
+      <Field name="operator"/>
+    </OGRVRTLayer>
+    <OGRVRTWarpedLayer>
+      <OGRVRTLayer name="others">
+        <SrcDataSource relativeToVRT="1">stations-3031.csv</SrcDataSource>
+        <SrcSQL>SELECT * FROM "stations-3031" WHERE operator &lt;&gt; 'Australia'</SrcSQL>
+        <LayerSRS>EPSG:3031</LayerSRS>
+        <GeometryField encoding="PointFromColumns" x="x" y="y"/>
+        <Field name="name"/>
+        <Field name="operator"/>
+      </OGRVRTLayer>
+      <TargetSRS>EPSG:4326</TargetSRS>
+    </OGRVRTWarpedLayer>
+  </OGRVRTUnionLayer>
+</OGRVRTDataSource>

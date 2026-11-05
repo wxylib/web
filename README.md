@@ -121,6 +121,75 @@ No basemap tiles in the screenshot for the same reason. Big polygons are
 costly: Overture division areas put whole countries in a row group, and a
 city view of them reads about 170 MB of geometry.
 
+## A vector VRT, read in the browser
+
+`www/vrt-vector.html` opens an OGR vector VRT (`OGRVRTDataSource` XML)
+and draws the layers it describes from their sources over HTTP, with each
+layer's features in a table. The XML is read by `www/ogrvrt.js` as GDAL's
+OGR_VRT driver reads it (GDAL 3.12's `ogrvrtlayer.cpp` and
+`ogrvrtdatasource.cpp` are the reference), for a subset of its elements:
+
+- `OGRVRTLayer` with `SrcDataSource` (`relativeToVRT`), `SrcLayer`,
+  `SrcSQL`, `FID`, `Style`, `GeometryType`, `LayerSRS`, `Field` (`name`,
+  `src`, `type`; String when no type is given, as in GDAL), `SrcRegion`
+  and the `Extent*` elements;
+- `GeometryField` encodings Direct, None, PointFromColumns, WKT and WKB
+  (bytes or hex), with `reportSrcColumn`, `SRS` and `SrcRegion` (the
+  first geometry field only);
+- `OGRVRTWarpedLayer` (`SrcSRS`, `TargetSRS`) and `OGRVRTUnionLayer`
+  (`SourceLayerFieldName`, `FieldStrategy`, `PreserveSrcFID`, `LayerSRS`,
+  `Field`), nested;
+- `SrcSQL` as OGR SQL: `SELECT *` or a field list with `AS`, one layer,
+  `WHERE` (AND, OR, NOT, comparisons, IN, BETWEEN, LIKE, ILIKE, IS NULL,
+  arithmetic), `ORDER BY`, `LIMIT`, `OFFSET`; no functions or joins.
+
+Sources, by file extension: GeoJSON, FlatGeobuf (through its spatial
+index: only the features in the map view are fetched, with range requests,
+and read again as the map moves), CSV (values are strings, as GDAL reads a
+CSV without a `.csvt`) and GeoParquet (WKB; the first 20,000 rows).
+`/vsicurl/`, `/vsis3/` and `/vsigs/` paths become https URLs. SRS: EPSG
+codes from a short list (every UTM zone, the polar stereographics, the
+Australian ones), WGS84 and OGC:CRS84, PROJ strings and WKT, by proj4js.
+Anything else in a VRT is listed under Notes on the page rather than
+dropped without a word, and so is a GDAL rule the page relaxes (a
+`SrcLayer` that does not match a single-layer source is read anyway).
+
+![US counties read by the view from a 14 MB FlatGeobuf file through a
+VRT](www/img/vrt.jpg)
+
+The examples, in `www/data/vrt`, use one or more of these each:
+`antarctic.vrt` (two CSV layers: points from columns with OGR style
+strings, and WKT lines in EPSG:3031), `countries.vrt` (Natural Earth
+GeoJSON on GitHub, a `SrcSQL` filter, an FID field, three renamed fields),
+`union.vrt` (a union of a layer and a warped layer), `countries-parquet.vrt`
+(GeoParquet with a `SrcRegion`) and `uscounties.vrt` (FlatGeobuf read by
+the view). `scripts/vrt_examples.py` writes their small sources.
+
+Each example is checked against GDAL feature by feature (fields, values,
+FIDs, geometry): `scripts/vrt_oracle.py` reads them with GDAL 3.12 (the
+pyogrio wheels) into `scripts/vrt-oracle.json`, and `scripts/vrt-test.mjs`
+reads them with `ogrvrt.js` and compares. Writing the examples against
+GDAL found that there is no `AttrFilter` element in OGR_VRT (GDAL
+ignores one without a word; `SrcSQL` is the way to filter), and that a union
+layer reports a feature count of 0, so GDAL's own reader in pyogrio has to
+use the Arrow path to see its features.
+
+The format readers are other people's: flatgeobuf, hyparquet (with
+hyparquet-compressors), proj4js and Leaflet, from jsDelivr and unpkg at
+pinned versions. GDAL itself compiled to wasm (gdal3.js) would read every
+VRT, but at tens of megabytes and without range reads of remote files;
+the VRT is small XML, so the page reads it and hands each source to a
+small reader that already exists. A layer can be downloaded as GeoJSON or
+opened in the editing canvas (`edit.html`, for CRS frames such as polar
+stereographic, which the web map here does not show).
+
+Not yet: a nested VRT as a source, GeoPackage and shapefiles, more than
+one geometry field, clipping to `SrcRegion`, SQL functions and the SQLite
+dialect, and row group pruning by the view for GeoParquet. The map is Web
+Mercator, so polar layers are drawn stretched; the jsDelivr `+esm`
+builds were stood in for by local bundles of the same versions in the
+tests here (the build machine cannot reach the CDNs).
+
 ## An editing canvas
 
 `www/edit.html` is a canvas for drawing and editing vector shapes with the
@@ -274,6 +343,8 @@ belongs.
 - `www/s2.html`, `www/s2.js`: Sentinel-2 on a web map.
 - `www/vector.html`, `www/vector.js`, `www/wkb.js`: GeoParquet queried in the browser.
 - `www/edit.html`, `www/edit.js`, `www/edit-core.js`, `www/edit-geo.js`: the editing canvas.
+- `www/vrt-vector.html`, `www/vrt-vector.js`, `www/ogrvrt.js`, `www/data/vrt/`: a vector VRT, read in the browser;
+  `scripts/vrt-test.mjs` checks it against GDAL (`scripts/vrt_oracle.py`, `scripts/vrt-oracle.json`).
 - `www/cog.html`, `www/cog.js`: one COG, any projection. Colouring is in JavaScript (percentile stretch; a
   sea and land ramp when values straddle zero, viridis otherwise, RGB for
   three bands). While dragging it warps at half size with nearest

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wxylib vector VRT</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --panel: #ffffff; --sel: #e8f0fe; --warn: #9c4a00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161618; --fg: #f2f2f2; --muted: #a1a1a6; --line: #3a3a3c; --panel: #1f1f22; --sel: #23324a; --warn: #f0a050; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--fg); display: flex; flex-direction: column;
+         font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); }
+  .app { flex: 1; display: flex; min-height: 0; }
+  aside { width: 380px; flex: none; overflow-y: auto; padding: 10px 12px; border-right: 1px solid var(--line); }
+  .view { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #map { flex: 3; min-height: 260px; }
+  #table { flex: 2; min-height: 160px; overflow: auto; border-top: 1px solid var(--line); background: var(--panel); }
+  @media (max-width: 700px) {
+    .app { flex-direction: column; }
+    aside { width: auto; max-height: 50vh; border-right: 0; border-bottom: 1px solid var(--line); }
+    .view { min-height: 70vh; }
+  }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 12px 0 6px; }
+  h2:first-child { margin-top: 0; }
+  label { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  select, input, button, textarea { font: inherit; color: var(--fg); background: var(--panel);
+                          border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; min-width: 0; }
+  select, #url { flex: 1; }
+  textarea { width: 100%; height: 230px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; resize: vertical; white-space: pre; }
+  button { cursor: pointer; }
+  button.wide { width: 100%; margin-top: 6px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hint { color: var(--muted); font-size: 12px; margin: 4px 0; }
+  #status { color: var(--muted); font-size: 12px; margin-top: 8px; white-space: pre-line; }
+  #status.error { color: #d70015; }
+  ul.layers { list-style: none; margin: 0; padding: 0; }
+  ul.layers li { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin: 6px 0; background: var(--panel); }
+  ul.layers li.on { outline: 2px solid var(--muted); }
+  ul.layers .top { display: flex; align-items: center; gap: 6px; }
+  ul.layers .top b { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; }
+  ul.layers .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  ul.layers .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  ul.layers .acts { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+  ul.layers .acts button { font-size: 12px; padding: 2px 6px; }
+  ul.layers .err { color: #d70015; font-size: 12px; margin-top: 2px; }
+  ul.notes { margin: 0; padding-left: 16px; color: var(--warn); font-size: 12px; }
+  details { margin-top: 10px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  details ul { padding-left: 16px; margin: 4px 0; font-size: 12px; }
+  table { border-collapse: collapse; font-size: 12px; width: max-content; min-width: 100%; }
+  th, td { padding: 3px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap;
+           max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+  th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--sel); }
+  tbody tr.on { background: var(--sel); outline: 1px solid var(--muted); }
+  #table .empty { padding: 12px; color: var(--muted); }
+  code { font-size: 12px; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>A vector VRT, read in the browser</h1>
+  <p>An OGR VRT is a few lines of XML that make a dataset out of other files: which layers, which fields, points
+    from two columns, geometry from WKT, an SQL filter, a region, a reprojection, a union. This page reads the XML
+    as GDAL does and draws the layers it describes from their sources, over HTTP.</p>
+</header>
+<div class="app">
+  <aside>
+    <h2>VRT</h2>
+    <label><select id="preset"></select></label>
+    <label id="urlrow" hidden><input id="url" type="text" spellcheck="false" placeholder="https://.../layers.vrt"></label>
+    <p class="hint" id="presethint"></p>
+    <textarea id="xml" spellcheck="false"></textarea>
+    <p class="hint">Edit the XML and open it again. Relative paths in <code>SrcDataSource</code> are read next to
+      the VRT's address; <code>/vsicurl/</code> and plain URLs need a server that allows CORS (and range requests,
+      for FlatGeobuf).</p>
+    <label><input id="follow" type="checkbox" checked> Read FlatGeobuf layers again when the map stops moving</label>
+    <button id="open" class="wide">Open</button>
+    <div id="status">Loading...</div>
+
+    <h2>Layers</h2>
+    <ul class="layers" id="layers"><li class="hint">None yet.</li></ul>
+    <div id="noteblock" hidden>
+      <h2>Notes</h2>
+      <ul class="notes" id="notes"></ul>
+    </div>
+
+    <details>
+      <summary>What this page reads, and what it does not</summary>
+      <ul>
+        <li><code>OGRVRTLayer</code>: <code>SrcDataSource</code> (with <code>relativeToVRT</code>), <code>SrcLayer</code>,
+          <code>SrcSQL</code>, <code>FID</code>, <code>Style</code>, <code>GeometryType</code>, <code>LayerSRS</code>,
+          <code>Field</code> (<code>name</code>, <code>src</code>, <code>type</code>), <code>SrcRegion</code>,
+          <code>ExtentXMin</code> and the rest (to zoom to).</li>
+        <li><code>GeometryField</code> encodings <code>Direct</code>, <code>None</code>, <code>PointFromColumns</code>
+          (<code>x</code>, <code>y</code>, <code>z</code>), <code>WKT</code> and <code>WKB</code> (bytes or hex), with
+          <code>reportSrcColumn</code>, <code>SRS</code> and <code>SrcRegion</code>; the first one only.</li>
+        <li><code>OGRVRTWarpedLayer</code> (<code>SrcSRS</code>, <code>TargetSRS</code>) and <code>OGRVRTUnionLayer</code>
+          (<code>SourceLayerFieldName</code>, <code>FieldStrategy</code>, <code>PreserveSrcFID</code>,
+          <code>LayerSRS</code>, <code>Field</code>), nested as deep as you like.</li>
+        <li><code>SrcSQL</code> as OGR SQL: <code>SELECT *</code> or fields (with <code>AS</code>), one layer,
+          <code>WHERE</code> (AND, OR, NOT, comparisons, IN, BETWEEN, LIKE, ILIKE, IS NULL, arithmetic),
+          <code>ORDER BY</code>, <code>LIMIT</code>, <code>OFFSET</code>. No functions, joins or SQLite dialect.</li>
+        <li>Sources by file extension: GeoJSON, FlatGeobuf (read through its spatial index, for the view),
+          CSV (values as strings, as GDAL reads them) and GeoParquet (WKB, the first 20,000 rows). Not GeoPackage,
+          shapefiles, databases or a nested VRT.</li>
+        <li>SRS: EPSG codes from a short list (with every UTM zone), WGS84 and OGC:CRS84, PROJ strings and WKT,
+          by proj4js. Coordinates are longitude, latitude, as GDAL's VRT driver orders them.</li>
+        <li><code>SrcRegion</code> keeps features that meet the region; with <code>clip="true"</code> they are not
+          clipped. OGR style strings colour the map (<code>PEN</code>, <code>BRUSH</code>, <code>SYMBOL</code>
+          colours, widths, dashes).</li>
+        <li>Anything else in the XML is listed under Notes. The examples are checked against GDAL 3.12, feature by
+          feature (<code>scripts/vrt-test.mjs</code>).</li>
+      </ul>
+    </details>
+    <p class="hint">Also: <a href="vector.html">GeoParquet, queried in the browser</a>; <a href="edit.html">an
+      editing canvas</a>; <a href="index.html">all examples</a>. Source: <a href="https://github.com/wxylib/web">wxylib/web</a>.</p>
+  </aside>
+  <div class="view">
+    <div id="map"></div>
+    <div id="table"><div class="empty">Open a VRT, then pick a layer to see its features here.</div></div>
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module" src="vrt-vector.js"></script>
+</body>
+</html>
