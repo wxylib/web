@@ -81,6 +81,72 @@ export function geodesicPoints(p, q, n) {
   return out;
 }
 
+// ---- loxodromes ------------------------------------------------------------------
+//
+// A loxodrome (rhumb line) keeps one azimuth all the way: the line a
+// vessel steers on a constant heading. On the ellipsoid it is straight in
+// longitude against isometric latitude (a straight line on Mercator), and
+// its length is the meridian arc it spans over the cosine of the heading.
+
+const E2 = F * (2 - F), E = Math.sqrt(E2);
+
+// isometric latitude (radians) of geodetic latitude phi (radians)
+function psi(phi) {
+  const s = Math.sin(phi);
+  return Math.atanh(s) - E * Math.atanh(E * s);
+}
+
+// meridian arc from the equator to phi (radians), metres (series in e2,
+// good to well under a millimetre)
+function meridian(phi) {
+  const e4 = E2 * E2, e6 = e4 * E2;
+  return A * ((1 - E2 / 4 - (3 * e4) / 64 - (5 * e6) / 256) * phi
+    - ((3 * E2) / 8 + (3 * e4) / 32 + (45 * e6) / 1024) * Math.sin(2 * phi)
+    + ((15 * e4) / 256 + (45 * e6) / 1024) * Math.sin(4 * phi)
+    - ((35 * e6) / 3072) * Math.sin(6 * phi));
+}
+
+// latitude whose meridian arc is m (Newton's method)
+function meridianInv(m) {
+  let phi = m / (A * (1 - E2 / 4));
+  for (let i = 0; i < 20; i++) {
+    const s = Math.sin(phi);
+    const d = (meridian(phi) - m) / ((A * (1 - E2)) / (1 - E2 * s * s) ** 1.5);
+    phi -= d;
+    if (Math.abs(d) < 1e-15) break;
+  }
+  return phi;
+}
+
+const wrapPi = (x) => x - 2 * Math.PI * Math.round(x / (2 * Math.PI));
+
+// Distance (metres) and the constant azimuth (degrees) of the loxodrome
+// from lon/lat 1 to 2, the shorter way round in longitude.
+export function rhumbInverse(lon1, lat1, lon2, lat2) {
+  const p1 = rad(lat1), p2 = rad(lat2), dl = wrapPi(rad(lon2 - lon1));
+  const dpsi = psi(p2) - psi(p1);
+  const az = Math.atan2(dl, dpsi);
+  let s;
+  if (Math.abs(Math.cos(az)) > 1e-9) s = (meridian(p2) - meridian(p1)) / Math.cos(az);
+  else {
+    const sp = Math.sin(p1);
+    s = Math.abs(dl) * (A / Math.sqrt(1 - E2 * sp * sp)) * Math.cos(p1); // along a parallel
+  }
+  return { s: Math.abs(s), az: norm360(deg(az)) };
+}
+
+// The point s metres from lon/lat along the loxodrome at azimuth az.
+export function rhumbDirect(lon1, lat1, az, s) {
+  const a = rad(az), p1 = rad(lat1);
+  const c = Math.cos(a);
+  if (Math.abs(c) < 1e-9) {
+    const sp = Math.sin(p1);
+    return [lon1 + deg((s * Math.sin(a)) / ((A / Math.sqrt(1 - E2 * sp * sp)) * Math.cos(p1))), lat1];
+  }
+  const p2 = meridianInv(meridian(p1) + s * c);
+  return [lon1 + deg(Math.tan(a) * (psi(p2) - psi(p1))), deg(p2)];
+}
+
 // A grid: functions from frame coordinates to lon/lat and back. The
 // helpers below answer the surveyor's questions at a frame point p: which
 // grid direction is a true azimuth, which true azimuth is a grid
@@ -88,9 +154,22 @@ export function geodesicPoints(p, q, n) {
 // stepping a short way and measuring, so they hold for any projection.
 const STEP = 1; // metres on the ground, frame units on the grid
 
+// geo.line is the edge model on the ground, "geodesic" or "rhumb": it
+// decides lineInverse, lineDirect and curve, the measures a drawn edge
+// and a locked distance and azimuth follow.
 export function makeGeo(toLL, fromLL) {
   const geo = {
-    toLL, fromLL,
+    toLL, fromLL, line: "geodesic",
+    // { s, az } from lon/lat a to b along the edge model
+    lineInverse(a, b) {
+      if (geo.line === "rhumb") return rhumbInverse(a[0], a[1], b[0], b[1]);
+      const g = inverse(a[0], a[1], b[0], b[1]);
+      return g && { s: g.s, az: g.az1 };
+    },
+    // lon/lat s metres from a at azimuth az along the edge model
+    lineDirect(a, az, s) {
+      return geo.line === "rhumb" ? rhumbDirect(a[0], a[1], az, s) : direct(a[0], a[1], az, s);
+    },
     // grid direction (math radians) of the true azimuth az (degrees) at p
     gridTheta(p, az) {
       const ll = toLL(p);
@@ -123,12 +202,19 @@ export function makeGeo(toLL, fromLL) {
       const g = inverse(a[0], a[1], b[0], b[1]);
       return g ? g.s : NaN;
     },
-    // a geodesic edge drawn in the frame, densified so each piece spans
-    // about maxLen frame units
+    // an edge drawn in the frame (geodesic or loxodrome, by geo.line),
+    // densified so each piece spans about maxLen frame units
     curve(p, q, maxLen) {
       const n = Math.min(256, Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / maxLen)));
       if (n < 2) return [p, q];
-      const pts = geodesicPoints(toLL(p), toLL(q), n).map(fromLL);
+      let ll;
+      if (geo.line === "rhumb") {
+        const a = toLL(p), b = toLL(q), g = rhumbInverse(a[0], a[1], b[0], b[1]);
+        ll = [a];
+        for (let i = 1; i < n; i++) ll.push(rhumbDirect(a[0], a[1], g.az, (g.s * i) / n));
+        ll.push(b);
+      } else ll = geodesicPoints(toLL(p), toLL(q), n);
+      const pts = ll.map(fromLL);
       pts[0] = p; pts[pts.length - 1] = q;
       return pts;
     },
