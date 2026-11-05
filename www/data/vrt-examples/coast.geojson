@@ -1,0 +1,5 @@
+{"type": "FeatureCollection", "features": [
+{"type": "Feature", "properties": {"site": "Hobart waterfront", "kind": "port"}, "geometry": {"type": "Point", "coordinates": [147.335, -42.885]}},
+{"type": "Feature", "properties": {"site": "Kingston Beach", "kind": "beach"}, "geometry": {"type": "Point", "coordinates": [147.32, -42.98]}},
+{"type": "Feature", "properties": {"site": "Bruny Island ferry", "kind": "port"}, "geometry": {"type": "Point", "coordinates": [147.25, -43.12]}}
+]}

@@ -11,9 +11,14 @@
 //! `inverse` on interleaved coordinates. CRS work is proj4rs (EPSG codes
 //! and proj strings, no PROJ).
 //!
+//! The VRT discovery page uses free functions over [`explore`]:
+//! `vrtClassic`, `vrtDsn`, `vrtLower` and `vrtPlan`, each returning JSON
+//! text. They read no bytes; the page fetches and passes text in.
+//!
 //! [`render`] holds the part that does not touch JavaScript, so it is
 //! tested natively against the wxylib/fixtures COGs.
 
+pub mod explore;
 pub mod render;
 
 #[cfg(target_arch = "wasm32")]
@@ -30,6 +35,37 @@ mod bindings {
     use crate::fetch::FetchReader;
     use crate::render::{self, View};
 
+    /// A classic VRT document as the model reads it (JSON).
+    #[wasm_bindgen(js_name = vrtClassic)]
+    pub fn vrt_classic(xml: String) -> String {
+        crate::explore::classic_json(&xml)
+    }
+
+    /// A source name parsed into its parts (JSON).
+    #[wasm_bindgen(js_name = vrtDsn)]
+    pub fn vrt_dsn(name: String) -> String {
+        crate::explore::dsn_json(&name)
+    }
+
+    /// A `vrt://` string lowered to classic VRT XML over a source
+    /// description (JSON in, JSON out).
+    #[wasm_bindgen(js_name = vrtLower)]
+    pub fn vrt_lower(dsn: String, info: String) -> String {
+        crate::explore::lower_json(&dsn, &info)
+    }
+
+    /// A read plan for one band of a classic VRT (JSON).
+    #[wasm_bindgen(js_name = vrtPlan)]
+    pub fn vrt_plan(
+        xml: String,
+        base: String,
+        band: usize,
+        req: Vec<f64>,
+        resolver: String,
+    ) -> String {
+        crate::explore::plan_json(&xml, &base, band, &req, &resolver)
+    }
+
     /// A pair of CRS transforms (proj4rs): EPSG codes or proj strings.
     #[wasm_bindgen]
     pub struct Transform(render::Transform);
@@ -38,7 +74,9 @@ mod bindings {
     impl Transform {
         #[wasm_bindgen(constructor)]
         pub fn new(src: String, dst: String) -> Result<Transform, JsError> {
-            render::Transform::new(&src, &dst).map(Transform).map_err(|e| JsError::new(&e))
+            render::Transform::new(&src, &dst)
+                .map(Transform)
+                .map_err(|e| JsError::new(&e))
         }
 
         /// Interleaved `x, y` pairs from `src` to `dst` (`NaN` on failure).
