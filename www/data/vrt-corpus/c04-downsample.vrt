@@ -1,0 +1,13 @@
+<VRTDataset rasterXSize="20" rasterYSize="20">
+  <SRS dataAxisToSRSAxisMapping="2,1">EPSG:4326</SRS>
+  <GeoTransform>0.0, 1.5, 0.0, 30.0, 0.0, -1.5</GeoTransform>
+  <VRTRasterBand dataType="Int16" band="1">
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">src/odd.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SourceProperties RasterXSize="30" RasterYSize="30" DataType="Int16" BlockXSize="30" BlockYSize="1"/>
+      <SrcRect xOff="0" yOff="0" xSize="30" ySize="30"/>
+      <DstRect xOff="0" yOff="0" xSize="20" ySize="20"/>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>

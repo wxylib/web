@@ -1,0 +1,60 @@
+<VRTDataset>
+  <Group name="/">
+    <Attribute name="title">
+      <DataType>String</DataType>
+      <Value>The three bands of a small RGB file, stacked as three time steps</Value>
+    </Attribute>
+    <Dimension name="time" size="3" type="TEMPORAL" indexingVariable="time"/>
+    <Dimension name="y" size="12" type="HORIZONTAL_Y" direction="NORTH" indexingVariable="y"/>
+    <Dimension name="x" size="16" type="HORIZONTAL_X" direction="EAST" indexingVariable="x"/>
+    <Array name="time">
+      <DataType>Float64</DataType>
+      <DimensionRef ref="time"/>
+      <Unit>days since 2024-01-01</Unit>
+      <InlineValues>0 1 2</InlineValues>
+    </Array>
+    <Array name="y">
+      <DataType>Float64</DataType>
+      <DimensionRef ref="y"/>
+      <RegularlySpacedValues start="11.5" increment="-1"/>
+    </Array>
+    <Array name="x">
+      <DataType>Float64</DataType>
+      <DimensionRef ref="x"/>
+      <RegularlySpacedValues start="0.5" increment="1"/>
+    </Array>
+    <Array name="value">
+      <DataType>Byte</DataType>
+      <DimensionRef ref="time"/>
+      <DimensionRef ref="y"/>
+      <DimensionRef ref="x"/>
+      <SRS dataAxisToSRSAxisMapping="2,3">EPSG:4326</SRS>
+      <Unit>count</Unit>
+      <Attribute name="long_name">
+        <DataType>String</DataType>
+        <Value>band value</Value>
+      </Attribute>
+      <Source>
+        <SourceFilename relativeToVRT="1">../vrt-corpus/src/rgb.tif</SourceFilename>
+        <SourceBand>1</SourceBand>
+        <SourceTranspose>-1,0,1</SourceTranspose>
+        <SourceSlab offset="0,0,0" count="1,12,16" step="1,1,1"/>
+        <DestSlab offset="0,0,0"/>
+      </Source>
+      <Source>
+        <SourceFilename relativeToVRT="1">../vrt-corpus/src/rgb.tif</SourceFilename>
+        <SourceBand>2</SourceBand>
+        <SourceTranspose>-1,0,1</SourceTranspose>
+        <SourceSlab offset="0,0,0" count="1,12,16" step="1,1,1"/>
+        <DestSlab offset="1,0,0"/>
+      </Source>
+      <Source>
+        <SourceFilename relativeToVRT="1">../vrt-corpus/src/rgb.tif</SourceFilename>
+        <SourceBand>3</SourceBand>
+        <SourceTranspose>-1,0,1</SourceTranspose>
+        <SourceSlab offset="0,0,0" count="1,12,16" step="1,1,1"/>
+        <DestSlab offset="2,0,0"/>
+      </Source>
+    </Array>
+  </Group>
+</VRTDataset>

@@ -915,7 +915,7 @@ dependencies = [
  "nix",
  "parking_lot",
  "percent-encoding",
- "quick-xml",
+ "quick-xml 0.41.0",
  "rand",
  "reqwest",
  "rustls-pki-types",
@@ -1034,6 +1034,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bdb2ff6e4d7329dc428ca2cb40f4c1ea85ef6c10aa6bd410294a1c835cd55567"
 dependencies = [
  "wasm-bindgen",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.38.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b66c2058c55a409d601666cffe35f04333cf1013010882cec174a7467cd4e21c"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -1766,6 +1775,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9deb2ef3cab718e534d28b39808182f57a0d77db172eedc8c18fbea14d1d545e"
 
 [[package]]
+name = "vrt-model"
+version = "0.0.1"
+source = "git+https://github.com/wxylib/core?rev=242562f0467c234dc510b4e52fa29f2ce81374f8#242562f0467c234dc510b4e52fa29f2ce81374f8"
+dependencies = [
+ "quick-xml 0.38.4",
+ "thiserror",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2062,7 +2080,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 [[package]]
 name = "wxy-domain"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=caba7b2ff19cc97dde505eed6fae6145ef9692aa#caba7b2ff19cc97dde505eed6fae6145ef9692aa"
+source = "git+https://github.com/wxylib/core?rev=242562f0467c234dc510b4e52fa29f2ce81374f8#242562f0467c234dc510b4e52fa29f2ce81374f8"
 dependencies = [
  "vaster",
 ]
@@ -2070,7 +2088,7 @@ dependencies = [
 [[package]]
 name = "wxy-source"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=caba7b2ff19cc97dde505eed6fae6145ef9692aa#caba7b2ff19cc97dde505eed6fae6145ef9692aa"
+source = "git+https://github.com/wxylib/core?rev=242562f0467c234dc510b4e52fa29f2ce81374f8#242562f0467c234dc510b4e52fa29f2ce81374f8"
 dependencies = [
  "async-trait",
  "futures",
@@ -2081,7 +2099,7 @@ dependencies = [
 [[package]]
 name = "wxy-tiff"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=caba7b2ff19cc97dde505eed6fae6145ef9692aa#caba7b2ff19cc97dde505eed6fae6145ef9692aa"
+source = "git+https://github.com/wxylib/core?rev=242562f0467c234dc510b4e52fa29f2ce81374f8#242562f0467c234dc510b4e52fa29f2ce81374f8"
 dependencies = [
  "async-tiff",
  "async-trait",
@@ -2094,7 +2112,7 @@ dependencies = [
 [[package]]
 name = "wxy-warp"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=caba7b2ff19cc97dde505eed6fae6145ef9692aa#caba7b2ff19cc97dde505eed6fae6145ef9692aa"
+source = "git+https://github.com/wxylib/core?rev=242562f0467c234dc510b4e52fa29f2ce81374f8#242562f0467c234dc510b4e52fa29f2ce81374f8"
 dependencies = [
  "controlledburn",
  "proj4rs",
@@ -2113,7 +2131,9 @@ dependencies = [
  "bytes",
  "js-sys",
  "rwarp",
+ "serde_json",
  "tokio",
+ "vrt-model",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

@@ -1,0 +1,47 @@
+<VRTDataset rasterXSize="40" rasterYSize="30">
+  <SRS dataAxisToSRSAxisMapping="2,1">EPSG:4326</SRS>
+  <GeoTransform>100, 1, 0, -10, 0, -1</GeoTransform>
+  <VRTRasterBand dataType="Byte" band="1">
+    <Description>four ways to name a 20 x 15 source: a relative path, a member of a zip, a nested VRT, a vrt:// string. The zip and vrt:// names are relative to the working directory, not to this file: relativeToVRT does not reach inside them.</Description>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">../vrt-corpus/src/tile0.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SourceProperties RasterXSize="20" RasterYSize="15" DataType="Byte"/>
+      <SrcRect xOff="0" yOff="0" xSize="20" ySize="15"/>
+      <DstRect xOff="0" yOff="0" xSize="20" ySize="15"/>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">/vsizip/{tiles.zip}/tiles/tile1.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SourceProperties RasterXSize="20" RasterYSize="15" DataType="Byte"/>
+      <SrcRect xOff="0" yOff="0" xSize="20" ySize="15"/>
+      <DstRect xOff="20" yOff="0" xSize="20" ySize="15"/>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">../vrt-corpus/c01-mosaic.vrt</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SrcRect xOff="0" yOff="15" xSize="20" ySize="15"/>
+      <DstRect xOff="0" yOff="15" xSize="20" ySize="15"/>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">vrt://../vrt-corpus/src/tile3.tif?a_srs=EPSG:4326</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SourceProperties RasterXSize="20" RasterYSize="15" DataType="Byte"/>
+      <SrcRect xOff="0" yOff="0" xSize="20" ySize="15"/>
+      <DstRect xOff="20" yOff="15" xSize="20" ySize="15"/>
+    </SimpleSource>
+  </VRTRasterBand>
+  <VRTRasterBand dataType="Int16" band="2">
+    <Description>a remote COG over HTTP: GHRSST sea surface temperature near Tasmania, 1200 x 1100 read into 40 x 30</Description>
+    <NoDataValue>-32768</NoDataValue>
+    <Scale>0.001</Scale>
+    <Offset>25</Offset>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">/vsicurl/https://data.source.coop/ausantarctic/ghrsst-mur-v2/2024/01/01/20240101090000-JPL-L4_GHRSST-SSTfnd-MUR-GLOB-v02.0-fv04.1_analysed_sst.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SourceProperties RasterXSize="36000" RasterYSize="17999" DataType="Int16" BlockXSize="512" BlockYSize="512"/>
+      <SrcRect xOff="32300" yOff="12900" xSize="1200" ySize="1100"/>
+      <DstRect xOff="0" yOff="0" xSize="40" ySize="30"/>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>

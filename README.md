@@ -170,6 +170,60 @@ only the first axis is stepped, so a VRT with time and depth shows the
 first depth. The parse holds the whole XML in memory; a VRT many times
 larger would want a streaming parse or the store's flat refs table.
 
+## What is in a VRT?
+
+`www/vrt.html` explores any VRT: give it a URL, a `vrt://` string, or a
+pasted document. It reads no pixels. It says:
+
+1. What kind of VRT it is: classic raster, warped, derived bands (pixel
+   functions), processed, pansharpened, multidimensional, vector, a
+   `vrt://` string, or a tile index (a neighbour), and what that kind does.
+2. What the document uses, as short facts: a mosaic, implicit resampling
+   (SrcRect and DstRect of different sizes), fractional windows, source
+   nodata, scaling, lookup tables, nested VRTs, archive members, driver
+   prefixes, `vrt://` sources, declared or undeclared source sizes, pixel
+   functions and their arguments, sources without a `SourceSlab` count.
+3. Every element used, how often, where, and what it does (`www/vrt-dict.js`
+   holds a sentence for each element, `vrt://` key and built-in pixel
+   function, written after the reference documentation), and the whole
+   document as a tree that builds as it is opened.
+4. For a classic raster: the grid, the bands, the sources with each name
+   parsed into its parts (`/vsi` chain, driver prefix and subdataset,
+   `vrt://` options), a figure of where each source lands, and a read plan:
+   for a window and buffer size, the source windows read, the whole pixels
+   asked for, where they land, the operations on the way, through any
+   nesting. "Read source headers" reads each TIFF source's image
+   directories (`www/tiffhead.js`, one or two range requests) and shows the
+   source's own grid with the tiles or strips the read needs, a close-up of
+   them, and the overview a reader would likely use instead.
+5. For a `vrt://` string: each key, its translate flag, the release that
+   added it, and whether vrt-model lowers it yet; then the source header is
+   read and the string lowered to the classic VRT it stands for.
+6. For a multidimensional VRT: groups, dimensions, arrays, and per array
+   its sources (first and last, common prefix, a strip of which indices
+   are filled) and the first source's header on request. For a vector VRT:
+   the layers, their sources, SQL, geometry encoding, fields and CRS.
+
+![A vrt:// window over one GHRSST COG: the nine 512 x 512 tiles a
+full-resolution read needs, and the overview a reduced read would use
+instead](docs/img/vrt-tiles.jpg)
+
+The model and planner are `vrt-model` (wxylib/core), in the same wasm
+module as `Cog` (`vrtClassic`, `vrtDsn`, `vrtLower`, `vrtPlan`, each JSON
+text in and out, `src/explore.rs`). The planner is the one that matches
+GDAL byte for byte on the wxylib/fixtures VRT corpus. Multidimensional VRT
+is parsed by `www/mdim-vrt.js` and vector VRT in `www/vrt.js` until
+vrt-model models them. For a derived band the plan rows are the pixel
+function's inputs; warped VRTs are described but not planned.
+
+Examples: the corpus (`www/data/vrt-corpus`, copied from
+wxylib/fixtures `vrt/`), five written for this page (`www/data/vrt-examples`:
+pixel functions, a warp, four forms of source name, an mdim stack, vector
+layers; `python scripts/vrt_examples_check.py` checks them with the GDAL in
+the rasterio and pyogrio wheels, all but the mdim one, which needs the
+multidimensional API), the published GHRSST MUR mdim VRT, and a `vrt://`
+window over one GHRSST COG. `?src=` opens any of them directly.
+
 ## An editing canvas
 
 `www/edit.html` is a canvas for drawing and editing vector shapes with the
@@ -360,6 +414,7 @@ belongs.
 - `www/s2.html`, `www/s2.js`: Sentinel-2 on a web map.
 - `www/vector.html`, `www/vector.js`, `www/wkb.js`: GeoParquet queried in the browser.
 - `www/mdim.html`, `www/mdim.js`, `www/mdim-vrt.js`: a multidimensional VRT read in the browser.
+- `www/vrt.html`, `www/vrt.js`, `www/vrt-dict.js`, `www/tiffhead.js`, `src/explore.rs`: what is in a VRT.
 - `www/edit.html`, `www/edit.js`, `www/edit-core.js`, `www/edit-geo.js`: the editing canvas.
 - `www/cog.html`, `www/cog.js`: one COG, any projection. Colouring is in JavaScript (percentile stretch; a
   sea and land ramp when values straddle zero, viridis otherwise, RGB for

@@ -1,0 +1,12 @@
+<VRTDataset rasterXSize="20" rasterYSize="20">
+  <SRS dataAxisToSRSAxisMapping="2,1">EPSG:4326</SRS>
+  <GeoTransform>110.0, 1.0, 0.0, -15.0, 0.0, -1.0</GeoTransform>
+  <VRTRasterBand dataType="Byte" band="1">
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">c01-mosaic.vrt</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SrcRect xOff="10" yOff="5" xSize="20" ySize="20"/>
+      <DstRect xOff="0" yOff="0" xSize="20" ySize="20"/>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>

@@ -1,0 +1,47 @@
+<OGRVRTDataSource>
+  <OGRVRTLayer name="stations">
+    <SrcDataSource relativeToVRT="1">stations.csv</SrcDataSource>
+    <SrcLayer>stations</SrcLayer>
+    <GeometryType>wkbPoint</GeometryType>
+    <LayerSRS>EPSG:4326</LayerSRS>
+    <GeometryField encoding="PointFromColumns" x="lon" y="lat"/>
+    <Field name="id" type="Integer"/>
+    <Field name="name" type="String"/>
+    <Field name="elevation" src="elev_m" type="Real"/>
+  </OGRVRTLayer>
+  <OGRVRTLayer name="ports">
+    <SrcDataSource relativeToVRT="1">coast.geojson</SrcDataSource>
+    <SrcSQL dialect="OGRSQL">SELECT site AS name FROM coast WHERE kind = 'port'</SrcSQL>
+    <GeometryType>wkbPoint</GeometryType>
+    <LayerSRS>EPSG:4326</LayerSRS>
+  </OGRVRTLayer>
+  <OGRVRTUnionLayer name="places">
+    <OGRVRTLayer name="stations_u">
+      <SrcDataSource relativeToVRT="1">stations.csv</SrcDataSource>
+      <SrcLayer>stations</SrcLayer>
+      <GeometryType>wkbPoint</GeometryType>
+      <LayerSRS>EPSG:4326</LayerSRS>
+      <GeometryField encoding="PointFromColumns" x="lon" y="lat"/>
+      <Field name="name" type="String"/>
+    </OGRVRTLayer>
+    <OGRVRTLayer name="ports_u">
+      <SrcDataSource relativeToVRT="1">coast.geojson</SrcDataSource>
+      <SrcSQL dialect="OGRSQL">SELECT site AS name FROM coast WHERE kind = 'port'</SrcSQL>
+      <GeometryType>wkbPoint</GeometryType>
+      <LayerSRS>EPSG:4326</LayerSRS>
+    </OGRVRTLayer>
+    <FieldStrategy>Intersection</FieldStrategy>
+    <SourceLayerFieldName>from_layer</SourceLayerFieldName>
+  </OGRVRTUnionLayer>
+  <OGRVRTWarpedLayer>
+    <OGRVRTLayer name="stations_polar">
+      <SrcDataSource relativeToVRT="1">stations.csv</SrcDataSource>
+      <SrcLayer>stations</SrcLayer>
+      <GeometryType>wkbPoint</GeometryType>
+      <LayerSRS>EPSG:4326</LayerSRS>
+      <GeometryField encoding="PointFromColumns" x="lon" y="lat"/>
+      <Field name="name" type="String"/>
+    </OGRVRTLayer>
+    <TargetSRS>EPSG:3031</TargetSRS>
+  </OGRVRTWarpedLayer>
+</OGRVRTDataSource>

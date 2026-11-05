@@ -1,0 +1,22 @@
+<VRTDataset rasterXSize="16" rasterYSize="12">
+  <SRS dataAxisToSRSAxisMapping="2,1">EPSG:4326</SRS>
+  <GeoTransform>0.0, 1.0, 0.0, 12.0, 0.0, -1.0</GeoTransform>
+  <VRTRasterBand dataType="Byte" band="1">
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">src/rgb.tif</SourceFilename>
+      <SourceBand>3</SourceBand>
+      <SourceProperties RasterXSize="16" RasterYSize="12" DataType="Byte" BlockXSize="16" BlockYSize="1"/>
+      <SrcRect xOff="0" yOff="0" xSize="16" ySize="12"/>
+      <DstRect xOff="0" yOff="0" xSize="16" ySize="12"/>
+    </SimpleSource>
+  </VRTRasterBand>
+  <VRTRasterBand dataType="Byte" band="2">
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">src/rgb.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SourceProperties RasterXSize="16" RasterYSize="12" DataType="Byte" BlockXSize="16" BlockYSize="1"/>
+      <SrcRect xOff="0" yOff="0" xSize="16" ySize="12"/>
+      <DstRect xOff="0" yOff="0" xSize="16" ySize="12"/>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>
