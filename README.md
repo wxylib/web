@@ -121,6 +121,55 @@ No basemap tiles in the screenshot for the same reason. Big polygons are
 costly: Overture division areas put whole countries in a row group, and a
 city view of them reads about 170 MB of geometry.
 
+## A multidimensional VRT, read in the browser
+
+`www/mdim.html` reads a GDAL multidimensional VRT (`mdim.vrt`) the way
+GDAL would, without GDAL. The default is the published GHRSST MUR v2 VRT
+on source.coop (`ausantarctic/ghrsst-mur-v2/ghrsst-mur-v2.vrt`, 16.6 MB
+of XML): five arrays of 8922 days x 17999 x 36000, 38,360 `<Source>`
+elements, one daily COG each (ZSTD with Predictor=2, 512 tiles, five
+overviews).
+
+1. The VRT is fetched and parsed in plain JavaScript (`www/mdim-vrt.js`,
+   no DOM beyond `DOMParser`): groups, dimensions, coordinate arrays
+   (`RegularlySpacedValues`, `InlineValues`), and for each array its type,
+   unit, nodata, scale, offset and sources (`SourceFilename`,
+   `SourceBand` or `SourceArray`, `SourceTranspose`, `SourceSlab`,
+   `DestSlab`). For GHRSST: 2.2 s to fetch, 2.4 s to parse.
+2. The day picked on the slider is a destination index; the source whose
+   `DestSlab` (and `SourceSlab` count, with `-1` in `SourceTranspose` as a
+   new axis of length 1) covers it is the file to read. The page shows
+   that `<Source>` element, and checks the VRT's x and y coordinates
+   against the COG's own grid.
+3. That COG is opened with range requests by `wxy-tiff` and warped onto
+   the canvas by `wxy-warp` (the `Cog` class below), in any of five
+   projections; the VRT's nodata, scale and offset turn the stored
+   integers into degrees C.
+4. A click reads one cell through the days either side (15 to 121): each
+   day is another source, opened for one full resolution pixel, two range
+   requests and about 180 kB each.
+
+![GHRSST MUR on 2024-04-26 around Tasmania through the published mdim.vrt,
+and a month at one cell](docs/img/mdim-tas.jpg)
+
+One view of a day reads the COG overview gdalwarp would pick (7 range
+requests, 0.6 MB for the whole globe). GDAL itself, reading the same
+view through the VRT, would read full resolution: an mdim VRT carries no
+overviews. `?vrt=`, `?array=`, `?t=` (the index on the first axis) and
+`?proj=` (`longlat`, `south`, `north`, `tas`, `moll`) open a view
+directly; any multidimensional VRT whose sources are COG bands served
+with CORS works. `/vsicurl/`, `/vsis3/` and `/vsigs/` names and paths
+relative to the VRT are turned into URLs.
+
+Not yet: sources that are netCDF or HDF5 arrays (`SourceArray`) are
+listed but not read (the BRAN2023 page reads those from a byte table
+instead). The whole source band is read, so a `SourceSlab` that selects
+part of it, `SourceView` and derived arrays are not honoured (the page
+says so when it meets one);
+only the first axis is stepped, so a VRT with time and depth shows the
+first depth. The parse holds the whole XML in memory; a VRT many times
+larger would want a streaming parse or the store's flat refs table.
+
 ## An editing canvas
 
 `www/edit.html` is a canvas for drawing and editing vector shapes with the
@@ -310,6 +359,7 @@ belongs.
 - `www/index.html`: the landing page, listing the examples.
 - `www/s2.html`, `www/s2.js`: Sentinel-2 on a web map.
 - `www/vector.html`, `www/vector.js`, `www/wkb.js`: GeoParquet queried in the browser.
+- `www/mdim.html`, `www/mdim.js`, `www/mdim-vrt.js`: a multidimensional VRT read in the browser.
 - `www/edit.html`, `www/edit.js`, `www/edit-core.js`, `www/edit-geo.js`: the editing canvas.
 - `www/cog.html`, `www/cog.js`: one COG, any projection. Colouring is in JavaScript (percentile stretch; a
   sea and land ramp when values straddle zero, viridis otherwise, RGB for
