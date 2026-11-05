@@ -11,13 +11,13 @@
 // vrt-model models them too.
 
 import init, { vrtClassic, vrtDsn, vrtLower, vrtPlan } from "./pkg/wxy_web.js";
-import { parseMdimVrt, allArrays, vsiToUrl } from "./mdim-vrt.js";
+import { parseMdimVrt, allArrays, vsiToUrl, coordValue, cfTime } from "./mdim-vrt.js";
 import { readTiffHeader } from "./tiffhead.js";
 import { FAMILIES, ELEMENTS, VRT_KEYS, PIXEL_FUNCTIONS, HANDLERS } from "./vrt-dict.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-const fmt = (v) => (typeof v === "number" ? (Number.isInteger(v) ? String(v) : String(+v.toPrecision(10))) : String(v));
+const fmt = (v) => (typeof v !== "number" ? String(v) : Math.abs(v) >= 1e15 ? (+v.toPrecision(10)).toExponential() : Number.isInteger(v) ? String(v) : String(+v.toPrecision(10)));
 const kids = (el, tag) => Array.from(el.children).filter((c) => c.tagName === tag);
 const kid = (el, tag) => kids(el, tag)[0] ?? null;
 const txt = (el, tag) => kid(el, tag)?.textContent.trim() ?? null;
@@ -25,6 +25,7 @@ const plural = (n, w) => `${n.toLocaleString("en")} ${w}${n === 1 ? "" : "s"}`;
 
 const CORPUS = new URL("data/vrt-corpus/", location.href).href;
 const TEACH = new URL("data/vrt-examples/", location.href).href;
+const AUS = "https://data.source.coop/ausantarctic/";
 const GHRSST = "https://data.source.coop/ausantarctic/ghrsst-mur-v2/";
 const GHRSST_COG = GHRSST + "2024/01/01/20240101090000-JPL-L4_GHRSST-SSTfnd-MUR-GLOB-v02.0-fv04.1_analysed_sst.tif";
 
@@ -54,6 +55,14 @@ const EXAMPLES = [
     ["REMA 2 m mosaic of Antarctica: 5,800 COG tiles and five overviews", "https://raw.githubusercontent.com/mdsumner/rema-ovr/main/REMA-2m_dem_ovr.vrt"],
     ["Copernicus DEM 30 m, global (OpenTopography; needs CORS on their side)", "https://opentopography.s3.sdsc.edu/raster/COP30/COP30_hh.vrt"],
     ["vrt:// over one GHRSST COG: Tasmania at a tenth", "vrt:///vsicurl/" + GHRSST_COG + "?srcwin=32300,12900,1200,1100&outsize=10%,10%"],
+  ]],
+  ["Antarctic and ocean collections (live, source.coop)", [
+    ["Bluelink BRAN daily temperature: 403 monthly netCDF files, 4D with depth", AUS + "ausantarctic-scratch/bluelink/bluelink-daily-temp/mdim.vrt"],
+    ["OISST v2.1 daily: 16,482 netCDF files, four arrays (24 MB)", AUS + "ausantarctic-scratch/oisst/oisst-v2.1-daily/mdim.vrt"],
+    ["AMSR2 sea ice south: daily netCDF with SourceTranspose, and gaps", AUS + "ausantarctic-scratch/seaice/asi-amsr2-v5.4-daily-south/mdim.vrt"],
+    ["ESA CCI ocean colour monthly: COGs with overview-level arrays", AUS + "ausantarctic-scratch/oceancolour/esacci-oc-v6.0-monthly-chlor_a/mdim.vrt"],
+    ["GEBCO 2024: one COG as an array, with eight overview levels", AUS + "gebco/virtual/gebco-2024/mdim.vrt"],
+    ["IBCSO v2: bed, ice surface and two id grids, each with overview levels", AUS + "ibcso/virtual/ibcso-v2/mdim.vrt"],
   ]],
 ];
 
@@ -877,10 +886,24 @@ function renderMdim() {
       const el = state.doc.querySelector(`Array[name="${CSS.escape(a.name)}"]`);
       const derived = el && kid(el, "DerivedArray") ? "derived" : "";
       return `<tr><td>${esc(a.group === "/" ? "" : a.group)}/${esc(a.name)}</td><td>${a.dims.map((d, i) => `${esc(d.replace(/^.*\//, ""))} ${a.shape[i] ?? "?"}`).join(" x ")}</td>` +
-        `<td>${esc(a.dtype ?? "")}</td><td>${esc(a.unit ?? "")}</td><td>${[a.nodata, a.scale, a.offset].map((v) => v ?? "").join(", ").replace(/^, , $/, "")}</td><td>${esc(from || derived)}</td></tr>`;
+        `<td>${esc(a.dtype ?? "")}</td><td>${esc(a.unit ?? "")}</td><td>${[["nodata", a.nodata], ["scale", a.scale], ["offset", a.offset]].filter(([, v]) => v != null).map(([k, v]) => `${k} ${esc(fmt(v))}`).join(", ")}</td><td>${esc(from || derived)}</td></tr>`;
     }).join("") + "</table>";
+  // Overview levels stored as sibling arrays: name_x2, name_x4, ... on dims x_x2, ...
+  const names = new Set(arrays.map((a) => a.name));
+  const levelOf = (a) => { const m = a.name.match(/^(.+)_x(\d+)$/); return m && names.has(m[1]) ? { base: m[1], f: +m[2] } : null; };
+  const levels = {};
+  for (const a of arrays) { const l = levelOf(a); if (l && a.dims.length) (levels[l.base] ??= []).push(l.f); }
+  const bases = Object.keys(levels).filter((b) => arrays.find((a) => a.name === b)?.sources?.length);
+  if (bases.length) {
+    const ex = bases[0], fs = levels[ex].sort((x, y) => x - y);
+    const ovSrc = arrays.find((a) => a.name === `${ex}_x${fs[0]}`)?.sources?.[0]?.file ?? "";
+    $("marrays").innerHTML += `<p class="hint">${plural(bases.length, "array")} (${bases.map(esc).join(", ")}) come${bases.length === 1 ? "s" : ""} with overview levels as sibling arrays: <code>${esc(ex)}_x${fs.join("</code>, <code>_x")}</code>, each on its own reduced dimensions.` +
+      (/^GTIFF_DIR:\d+:/.test(ovSrc) ? ` Their sources name the source TIFF's internal overviews with <code>GTIFF_DIR:n:</code>, so each level reads bytes that already exist.` : "") +
+      ` A multidimensional VRT has no overview element of its own; this naming is a convention a reader has to know.</p>`;
+  }
   const data = arrays.filter((a) => a.sources?.some((x) => x.kind === "Source"));
-  $("msources").innerHTML = data.map((a) => {
+  const dimArray = (d) => arrays.find((x) => x.dims.length === 1 && x.dims[0] === d);
+  const one = (a) => {
     const s = a.sources;
     const kinds = [...new Set(s.map((x) => x.kind))].join(", ");
     const files = new Set(s.map((x) => x.file));
@@ -898,6 +921,16 @@ function renderMdim() {
       for (let i = off; i < Math.min(off + cnt, cover.length); i++) cover[i] = 1;
     }
     const filled = cover.reduce((p, v) => p + v, 0);
+    let gaps = "";
+    if (filled < cover.length) {
+      const runs = [];
+      for (let i = 0; i < cover.length; i++) if (!cover[i]) { let j = i; while (j + 1 < cover.length && !cover[j + 1]) j++; runs.push([i, j]); i = j; }
+      const ca = dimArray(a.dims[0]);
+      const toDate = cfTime(ca?.unit);
+      const at = (i) => { const v = coordValue(ca, i); return v == null ? "" : toDate ? toDate(v).toISOString().slice(0, 10) : fmt(v); };
+      const show = (r) => `${r[0]}${r[1] > r[0] ? "-" + r[1] : ""}${at(r[0]) ? ` (${at(r[0])}${r[1] > r[0] ? " to " + at(r[1]) : ""})` : ""}`;
+      gaps = `<p class="hint">${(cover.length - filled).toLocaleString("en")} ${cover.length - filled === 1 ? "index" : "indices"} with no source, in ${plural(runs.length, "run")}: ${runs.slice(0, 8).map(show).join("; ")}${runs.length > 8 ? "; ..." : ""}. A read there gets nodata.</p>`;
+    }
     return `<h3>${esc(a.name)}: ${plural(s.length, "source")} (${esc(kinds)}) over ${plural(files.size, "file")}</h3>` +
       `<p class="name">first: ${dsnChips(d0)} <button class="mhdr" data-file="${esc(s[0].file)}">Read its header</button></p><div class="mhdrout"></div>` +
       (prefix.length > 8 ? `<p class="hint">Common prefix: <code>${esc(prefix)}</code></p>` : "") +
@@ -906,9 +939,12 @@ function renderMdim() {
         ? `<tr><td colspan="6" class="hint">... ${(s.length - 6).toLocaleString("en")} more like these</td></tr>`
         : `<tr><td>${s.indexOf(x) + 1}</td><td class="name">${esc(x.file.slice(prefix.length > 8 ? prefix.length : 0))}</td><td>${esc(x.array ?? x.band ?? "")}</td><td>${esc(x.transpose?.join(",") ?? "")}</td>` +
           `<td>${esc(x.srcOffset?.join(",") ?? "")} / ${esc(x.srcCount?.join(",") ?? "none")}</td><td>${esc(x.destOffset?.join(",") ?? "")}</td></tr>`).join("") + "</table>" +
-      (len ? stripSvg(cover, a.dims[0]?.replace(/^.*\//, "") ?? "axis 0", filled) : "") +
+      (len ? stripSvg(cover, a.dims[0]?.replace(/^.*\//, "") ?? "axis 0", filled) + gaps : "") +
       (noCount ? `<p class="warn">${plural(noCount, "source")} without a SourceSlab count: the reference library opens each to learn its shape, on every read.</p>` : "");
-  }).join("");
+  };
+  const main = data.filter((a) => !levelOf(a)), ovs = data.filter((a) => levelOf(a));
+  $("msources").innerHTML = main.map(one).join("") +
+    (ovs.length ? `<details><summary>Sources of the ${plural(ovs.length, "overview-level array")}</summary>${ovs.map(one).join("")}</details>` : "");
 }
 
 async function mdimHeader(btn) {
@@ -920,7 +956,24 @@ async function mdimHeader(btn) {
     const h = await readTiffHeader(url);
     out.innerHTML = `<p class="hint">${h.width} x ${h.height} ${h.dataType}, ${h.layout} of ${h.block.join(" x ")} (${(h.blocks[0] * h.blocks[1]).toLocaleString("en")} per image), ${esc(h.compression)}${h.predictor > 1 ? " with predictor " + h.predictor : ""}, ${plural(h.overviews.length, "overview")}${h.epsg ? ", EPSG:" + h.epsg : ""}${h.nodata != null ? ", nodata " + esc(h.nodata) : ""}; ${plural(h.requests, "range request")}, ${(h.bytes / 1024).toFixed(0)} KB.</p>`;
   } catch (e) {
-    out.innerHTML = `<p class="warn">${esc(e.message)}</p>`;
+    if (e.message !== "not a TIFF") { out.innerHTML = `<p class="warn">${e instanceof TypeError ? "The browser could not read it (the host is unreachable or sends no CORS headers): " : ""}${esc(e.message)}</p>`; return; }
+    out.innerHTML = await sniff(url);
+  }
+}
+
+// Name the format of a file that is not a TIFF, from its first bytes.
+async function sniff(url) {
+  try {
+    const r = await fetch(url, { headers: { Range: "bytes=0-7" } });
+    const b = new Uint8Array(await r.arrayBuffer()).slice(0, 8);
+    const size = r.headers.get("content-range")?.split("/")[1];
+    const sz = size && size !== "*" ? `, ${(+size / 1048576).toFixed(1)} MB` : "";
+    const sig = String.fromCharCode(...b);
+    const kind = sig.startsWith("\x89HDF") ? "netCDF-4 (HDF5)" : sig.startsWith("CDF\x01") ? "classic netCDF" : sig.startsWith("CDF\x02") ? "netCDF 64-bit offset" : sig.startsWith("CDF\x05") ? "netCDF 64-bit data" : sig.startsWith("GRIB") ? "GRIB" : null;
+    return `<p class="hint">${kind ? `A ${kind} file${sz}.` : `Not a TIFF (first bytes ${[...b].map((x) => x.toString(16).padStart(2, "0")).join(" ")})${sz}.`} This page reads TIFF headers only.` +
+      (kind?.startsWith("netCDF-4") ? " Its chunks are found by walking the HDF5 B-trees, the job a byte-reference harvester does once so readers do not have to." : "") + "</p>";
+  } catch (e) {
+    return `<p class="warn">Not a TIFF, and the first bytes could not be read: ${esc(e.message)}</p>`;
   }
 }
 
