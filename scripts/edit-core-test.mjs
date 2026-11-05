@@ -2,10 +2,11 @@
 import assert from "node:assert/strict";
 import {
   fromGeoJSON, toGeoJSON, snap, constrain, History, toTheta, fromTheta, featureById,
-  nudgeStart, nudgeStep, finishNudge, apply, crossings,
+  nudgeStart, nudgeStep, finishNudge, apply, crossings, makeFrame,
 } from "../www/edit-core.js";
-import { inverse, direct, makeGeo } from "../www/edit-geo.js";
+import { inverse, direct, makeGeo, rhumbInverse, rhumbDirect } from "../www/edit-geo.js";
 import { transects, cover, clip, lawnmower, repeat } from "../www/edit-pattern.js";
+import { circle3, arc3, shapeRing, shapeFromDrag, SHAPE_KEY } from "../www/edit-shape.js";
 
 const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} != ${b}`);
 const nearPt = (p, q, tol = 1e-9) => { near(p[0], q[0], tol); near(p[1], q[1], tol); };
@@ -186,6 +187,75 @@ test("crossings are found, and a nudge that keeps rings simple stops at the othe
   const w = smudge(true);
   assert.equal(crossings([w]).length, 0);
   assert.ok(Math.max(...w.xy.filter((p) => p[0] > 2 && p[0] < 9 && p[1] < 2).map((p) => p[1])) > 1.9); // it moved, up to the wall
+});
+
+test("loxodromes: meridians and parallels, round trips, constant heading", () => {
+  // along a meridian a loxodrome is the geodesic
+  const m = rhumbInverse(147, -42, 147, -66), g = inverse(147, -42, 147, -66);
+  near(m.s, g.s, 1e-3); near(m.az, 180, 1e-12);
+  // along a parallel: the arc of the parallel, heading east
+  const p = rhumbInverse(100, -60, 101, -60);
+  const N = 6378137 / Math.sqrt(1 - 0.0066943799901413165 * Math.sin(-Math.PI / 3) ** 2);
+  near(p.s, (N * Math.cos(Math.PI / 3) * Math.PI) / 180, 1e-6); near(p.az, 90, 1e-9);
+  // longer than the geodesic between the same points, and back again
+  const a = [147.33, -42.88], b = [110.53, -66.28];
+  const r = rhumbInverse(a[0], a[1], b[0], b[1]);
+  assert.ok(r.s > inverse(a[0], a[1], b[0], b[1]).s);
+  nearPt(rhumbDirect(a[0], a[1], r.az, r.s), b, 1e-9);
+  // the heading holds: every piece has the same azimuth
+  const q = rhumbDirect(a[0], a[1], r.az, r.s / 3);
+  near(rhumbInverse(q[0], q[1], b[0], b[1]).az, r.az, 1e-9);
+  // and a geo's edge model switches what lineDirect follows
+  const geo = makeGeo((x) => x, (x) => x);
+  nearPt(geo.lineDirect(a, r.az, r.s), direct(a[0], a[1], r.az, r.s));
+  geo.line = "rhumb";
+  nearPt(geo.lineDirect(a, r.az, r.s), b, 1e-9);
+});
+
+test("parametric shapes: circles, arcs, rectangles, on the grid and the ground", () => {
+  const k = circle3([1, 0], [0, 1], [-1, 0]);
+  nearPt(k.c, [0, 0]); near(k.r, 1);
+  assert.equal(circle3([0, 0], [1, 1], [2, 2]), null);
+  near(arc3([1, 0], [0, 1], [-1, 0]).sweep, Math.PI);
+  near(arc3([1, 0], [0, -1], [-1, 0]).sweep, -Math.PI);
+  const nat = makeFrame("native");
+  const c4 = shapeRing({ kind: "circle", c: [0, 0], r: 10, n: 4 }, nat);
+  [[0, 10], [10, 0], [0, -10], [-10, 0]].forEach((q, i) => nearPt(c4.xy[i], q));
+  const arc = shapeRing({ kind: "arc", a: [1, 0], b: [0, 1], c: [-1, 0], n: 8 }, nat);
+  assert.equal(arc.xy.length, 9);
+  for (const p of arc.xy) { near(Math.hypot(p[0], p[1]), 1); assert.ok(p[1] >= -1e-12); }
+  // a rectangle dragged up and to the left, axis north: corner kept, sides positive
+  const r = shapeFromDrag("rect", [0, 0], [-3, 4], { az: 0 });
+  assert.ok(r.w > 0 && r.h > 0);
+  const ring = shapeRing(r, nat).xy;
+  const xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
+  near(Math.min(...xs), -3); near(Math.max(...xs), 0); near(Math.min(...ys), 0); near(Math.max(...ys), 4);
+  // on the ground: a 500 m circle about Hobart in a local plane is 500 m on the ellipsoid
+  const loc = makeFrame("local", 147.3, -42.9), geo = makeGeo(loc.toLL, loc.fromLL);
+  const g = shapeFromDrag("circle", loc.fwd([147.3, -42.9]), loc.fwd([147.3, -42.9 + 0.0045]), { n: 36, ground: true }, geo, loc.inv);
+  near(g.r, inverse(147.3, -42.9, 147.3, -42.9 + 0.0045).s, 1e-6);
+  for (const p of shapeRing(g, loc, geo).xy) { const q = loc.inv(p); near(inverse(147.3, -42.9, q[0], q[1]).s, g.r, 1e-5); }
+});
+
+test("a shaped feature becomes plain geometry when a vertex moves, and undo restores it", () => {
+  const doc = fromGeoJSON({ type: "FeatureCollection", features: [] });
+  const shape = { kind: "circle", c: [1000, 1000], r: 10, n: 6 };
+  const xy = shapeRing(shape, doc.frame).xy;
+  const h = new History(doc);
+  h.run({ op: "add", feature: { id: "c", type: "Polygon", props: { [SHAPE_KEY]: shape }, rings: [{ part: 0, closed: true, xy, src: xy.map(() => null) }] } });
+  // the shape's own edit keeps it
+  const r2 = { ...shape, r: 20 }, xy2 = shapeRing(r2, doc.frame).xy;
+  h.run({ op: "batch", keepShape: true, ops: [
+    { op: "reshape", fid: "c", ri: 0, before: { xy, src: xy.map(() => null) }, after: { xy: xy2, src: xy2.map(() => null) } },
+    { op: "props", fid: "c", before: { [SHAPE_KEY]: shape }, after: { [SHAPE_KEY]: r2 } }] });
+  near(featureById(doc, "c").props[SHAPE_KEY].r, 20);
+  h.run({ op: "move", fid: "c", ri: 0, vi: 0, to: [1000, 1030] });
+  assert.ok(!(SHAPE_KEY in featureById(doc, "c").props));
+  h.undo();
+  near(featureById(doc, "c").props[SHAPE_KEY].r, 20);
+  nearPt(featureById(doc, "c").rings[0].xy[0], xy2[0]);
+  h.undo();
+  near(featureById(doc, "c").props[SHAPE_KEY].r, 10);
 });
 
 test("Vincenty: Flinders Peak to Buninyong", () => {

@@ -155,7 +155,7 @@ dropped without a word, and so is a GDAL rule the page relaxes (a
 `SrcLayer` that does not match a single-layer source is read anyway).
 
 ![US counties read by the view from a 14 MB FlatGeobuf file through a
-VRT](www/img/vrt.jpg)
+VRT](www/img/vrt-vector.jpg)
 
 The examples, in `www/data/vrt`, use one or more of these each:
 `antarctic.vrt` (two CSV layers: points from columns with OGR style
@@ -190,6 +190,109 @@ Mercator, so polar layers are drawn stretched; the jsDelivr `+esm`
 builds were stood in for by local bundles of the same versions in the
 tests here (the build machine cannot reach the CDNs).
 
+## A multidimensional VRT, read in the browser
+
+`www/mdim.html` reads a GDAL multidimensional VRT (`mdim.vrt`) the way
+GDAL would, without GDAL. The default is the published GHRSST MUR v2 VRT
+on source.coop (`ausantarctic/ghrsst-mur-v2/ghrsst-mur-v2.vrt`, 16.6 MB
+of XML): five arrays of 8922 days x 17999 x 36000, 38,360 `<Source>`
+elements, one daily COG each (ZSTD with Predictor=2, 512 tiles, five
+overviews).
+
+1. The VRT is fetched and parsed in plain JavaScript (`www/mdim-vrt.js`,
+   no DOM beyond `DOMParser`): groups, dimensions, coordinate arrays
+   (`RegularlySpacedValues`, `InlineValues`), and for each array its type,
+   unit, nodata, scale, offset and sources (`SourceFilename`,
+   `SourceBand` or `SourceArray`, `SourceTranspose`, `SourceSlab`,
+   `DestSlab`). For GHRSST: 2.2 s to fetch, 2.4 s to parse.
+2. The day picked on the slider is a destination index; the source whose
+   `DestSlab` (and `SourceSlab` count, with `-1` in `SourceTranspose` as a
+   new axis of length 1) covers it is the file to read. The page shows
+   that `<Source>` element, and checks the VRT's x and y coordinates
+   against the COG's own grid.
+3. That COG is opened with range requests by `wxy-tiff` and warped onto
+   the canvas by `wxy-warp` (the `Cog` class below), in any of five
+   projections; the VRT's nodata, scale and offset turn the stored
+   integers into degrees C.
+4. A click reads one cell through the days either side (15 to 121): each
+   day is another source, opened for one full resolution pixel, two range
+   requests and about 180 kB each.
+
+![GHRSST MUR on 2024-04-26 around Tasmania through the published mdim.vrt,
+and a month at one cell](docs/img/mdim-tas.jpg)
+
+One view of a day reads the COG overview gdalwarp would pick (7 range
+requests, 0.6 MB for the whole globe). GDAL itself, reading the same
+view through the VRT, would read full resolution: an mdim VRT carries no
+overviews. `?vrt=`, `?array=`, `?t=` (the index on the first axis) and
+`?proj=` (`longlat`, `south`, `north`, `tas`, `moll`) open a view
+directly; any multidimensional VRT whose sources are COG bands served
+with CORS works. `/vsicurl/`, `/vsis3/` and `/vsigs/` names and paths
+relative to the VRT are turned into URLs.
+
+Not yet: sources that are netCDF or HDF5 arrays (`SourceArray`) are
+listed but not read (the BRAN2023 page reads those from a byte table
+instead). The whole source band is read, so a `SourceSlab` that selects
+part of it, `SourceView` and derived arrays are not honoured (the page
+says so when it meets one);
+only the first axis is stepped, so a VRT with time and depth shows the
+first depth. The parse holds the whole XML in memory; a VRT many times
+larger would want a streaming parse or the store's flat refs table.
+
+## What is in a VRT?
+
+`www/vrt.html` explores any VRT: give it a URL, a `vrt://` string, or a
+pasted document. It reads no pixels. It says:
+
+1. What kind of VRT it is: classic raster, warped, derived bands (pixel
+   functions), processed, pansharpened, multidimensional, vector, a
+   `vrt://` string, or a tile index (a neighbour), and what that kind does.
+2. What the document uses, as short facts: a mosaic, implicit resampling
+   (SrcRect and DstRect of different sizes), fractional windows, source
+   nodata, scaling, lookup tables, nested VRTs, archive members, driver
+   prefixes, `vrt://` sources, declared or undeclared source sizes, pixel
+   functions and their arguments, sources without a `SourceSlab` count.
+3. Every element used, how often, where, and what it does (`www/vrt-dict.js`
+   holds a sentence for each element, `vrt://` key and built-in pixel
+   function, written after the reference documentation), and the whole
+   document as a tree that builds as it is opened.
+4. For a classic raster: the grid, the bands, the sources with each name
+   parsed into its parts (`/vsi` chain, driver prefix and subdataset,
+   `vrt://` options), a figure of where each source lands, and a read plan:
+   for a window and buffer size, the source windows read, the whole pixels
+   asked for, where they land, the operations on the way, through any
+   nesting. "Read source headers" reads each TIFF source's image
+   directories (`www/tiffhead.js`, one or two range requests) and shows the
+   source's own grid with the tiles or strips the read needs, a close-up of
+   them, and the overview a reader would likely use instead.
+5. For a `vrt://` string: each key, its translate flag, the release that
+   added it, and whether vrt-model lowers it yet; then the source header is
+   read and the string lowered to the classic VRT it stands for.
+6. For a multidimensional VRT: groups, dimensions, arrays, and per array
+   its sources (first and last, common prefix, a strip of which indices
+   are filled) and the first source's header on request. For a vector VRT:
+   the layers, their sources, SQL, geometry encoding, fields and CRS.
+
+![A vrt:// window over one GHRSST COG: the nine 512 x 512 tiles a
+full-resolution read needs, and the overview a reduced read would use
+instead](docs/img/vrt-tiles.jpg)
+
+The model and planner are `vrt-model` (wxylib/core), in the same wasm
+module as `Cog` (`vrtClassic`, `vrtDsn`, `vrtLower`, `vrtPlan`, each JSON
+text in and out, `src/explore.rs`). The planner is the one that matches
+GDAL byte for byte on the wxylib/fixtures VRT corpus. Multidimensional VRT
+is parsed by `www/mdim-vrt.js` and vector VRT in `www/vrt.js` until
+vrt-model models them. For a derived band the plan rows are the pixel
+function's inputs; warped VRTs are described but not planned.
+
+Examples: the corpus (`www/data/vrt-corpus`, copied from
+wxylib/fixtures `vrt/`), five written for this page (`www/data/vrt-examples`:
+pixel functions, a warp, four forms of source name, an mdim stack, vector
+layers; `python scripts/vrt_examples_check.py` checks them with the GDAL in
+the rasterio and pyogrio wheels, all but the mdim one, which needs the
+multidimensional API), the published GHRSST MUR mdim VRT, and a `vrt://`
+window over one GHRSST COG. `?src=` opens any of them directly.
+
 ## An editing canvas
 
 `www/edit.html` is a canvas for drawing and editing vector shapes with the
@@ -222,6 +325,9 @@ without it the page still edits in data coordinates or a local plane.
   simple), and counted in the feature panel. Nothing is refused.
 - Field patterns (`6`): transects, transects filling a polygon, a
   lawnmower track and repeats, in ground metres and true azimuths.
+- Parametric shapes (`7`): circles, regular polygons, rectangles and
+  arcs through three points, which keep their parameters beside their
+  vertices.
 - A coordinate table beside the drawing, editable to full precision.
 - Every edit is an operation in a log (move, insert, delete, add,
   remove), undone and redone in order and downloadable as JSON lines.
@@ -258,9 +364,13 @@ drawing:
   and distance are both locked);
 - north as grid north or true north (a locked bearing or bearing steps
   are true azimuths, the convergence applied);
-- edges straight on the grid or geodesics: each segment drawn, snapped
-  to and split at its middle as the geodesic between its vertices
-  (WGS84, Vincenty), with the straight chords dashed for comparison.
+- edges straight on the grid, geodesics or loxodromes: each segment
+  drawn, snapped to and split at its middle as the geodesic (WGS84,
+  Vincenty) or the loxodrome (rhumb line, constant heading, the line a
+  vessel steers) between its vertices, with the straight chords dashed
+  for comparison. Locked distances and azimuths, the readout and the
+  field patterns follow the same edges, so transects become constant
+  heading lines when edges are loxodromes.
 
 A COG can be laid under the drawing: `wxy-warp` warps it straight into
 the edit frame for each view, whatever the frame's CRS, so imagery and
@@ -273,6 +383,34 @@ in the readout](docs/img/edit-underlay.jpg)
 ![A route from Hobart to Casey to Dumont d'Urville edited on south polar
 stereographic: the edges are geodesics, the dashed chords are the straight
 grid lines](docs/img/edit-geodesic.jpg)
+
+### Parametric shapes
+
+The shape tool (`7`) draws a circle (press the centre, drag the
+radius), a regular polygon (centre, drag to its first vertex), a
+rectangle (a corner, drag the diagonal, on an axis azimuth from the
+panel) or an arc (click its start, a point on it and its end). Snapping
+applies to every point. With a CRS and distances on the ellipsoid,
+radius, width and height are metres on the ground and azimuths are true,
+each vertex placed by the direct solution on the ellipsoid; otherwise
+they are frame units.
+
+A shape keeps its parameters in the feature's properties (`wxy:shape`,
+with points in the data's coordinates, so it survives a change of frame
+and a GeoJSON round trip) beside the vertices it produced. Selecting it
+shows the parameters as fields: change the radius and the vertices
+follow, as one undoable step. Moving a vertex makes the feature plain
+geometry, and undo brings the shape back; "Make plain geometry" does it
+on purpose. Nothing is held that was not asked for.
+
+![A 12 m circle on the ground, its radius and vertex count editable in the
+panel, with a hexagon, a rectangle on the block's 7 degree axis and an arc
+between two parcel corners](docs/img/edit-shapes.jpg)
+
+![Loxodrome edges in south polar stereographic: Hobart to Casey as a
+rhumb line (3471 km on a steady heading of 221.4 degrees, against 3431 km
+for the geodesic), and transects from Hobart holding a heading of 200
+degrees](docs/img/edit-loxodrome.jpg)
 
 ### Field patterns
 
@@ -305,14 +443,16 @@ ringed; on, each vertex stops at the edge it would have crossed:
 
 The engine (`www/edit-core.js`: geometry, snapping, constraints, the
 operation log, crossings), `www/edit-geo.js` (geodesics, convergence, scale
-factor) and `www/edit-pattern.js` (transects, cover, clip, repeat) have no DOM and are tested with node
+factor, loxodromes), `www/edit-pattern.js` (transects, cover, clip,
+repeat) and `www/edit-shape.js` (parametric shapes) have no DOM and are tested with node
 (`node scripts/edit-core-test.mjs`, also in CI); `www/edit.js` is the
 canvas and the panels. The sample is synthetic (six parcels, a road, a
 creek and four trees, in UTM zone 55 south over Hobart), so the page
 works offline;
 `?url=` or the file box loads any GeoJSON.
 
-Not yet: attribute editing, splitting, offsetting and the other shape operations,
+Not yet: attribute editing, splitting, offsetting, constraints held between
+shapes (a solver),
 construction guides, and any store for the edits beyond downloading
 them. Musing m18 sets out which of these come next and where each
 belongs.
@@ -342,6 +482,8 @@ belongs.
 - `www/index.html`: the landing page, listing the examples.
 - `www/s2.html`, `www/s2.js`: Sentinel-2 on a web map.
 - `www/vector.html`, `www/vector.js`, `www/wkb.js`: GeoParquet queried in the browser.
+- `www/mdim.html`, `www/mdim.js`, `www/mdim-vrt.js`: a multidimensional VRT read in the browser.
+- `www/vrt.html`, `www/vrt.js`, `www/vrt-dict.js`, `www/tiffhead.js`, `src/explore.rs`: what is in a VRT.
 - `www/edit.html`, `www/edit.js`, `www/edit-core.js`, `www/edit-geo.js`: the editing canvas.
 - `www/vrt-vector.html`, `www/vrt-vector.js`, `www/ogrvrt.js`, `www/data/vrt/`: a vector VRT, read in the browser;
   `scripts/vrt-test.mjs` checks it against GDAL (`scripts/vrt_oracle.py`, `scripts/vrt-oracle.json`).

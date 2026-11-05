@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wxylib mdim VRT</title>
+<style>
+  :root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --panel: #ffffff; --accent: #1f5fa8; --hi: #fff4c2; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161618; --fg: #f2f2f2; --muted: #a1a1a6; --line: #3a3a3c; --panel: #1f1f22; --accent: #7fb0e8; --hi: #3d3518; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 16px 40px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 6px; }
+  .lede { color: var(--muted); margin: 0 0 12px; max-width: 860px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 8px 0; }
+  .row label { display: flex; gap: 6px; align-items: center; }
+  select, button, input { font: inherit; color: var(--fg); background: var(--panel);
+                          border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+  input[type=range] { width: 280px; max-width: 100%; padding: 0; }
+  input[type=number] { width: 72px; }
+  button { cursor: pointer; }
+  .url { display: flex; gap: 6px; }
+  .url input { flex: 1; min-width: 0; }
+  .stage { position: relative; }
+  canvas#map { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px;
+               background: repeating-conic-gradient(var(--panel) 0 25%, var(--bg) 0 50%) 0 0 / 16px 16px;
+               touch-action: none; cursor: crosshair; }
+  canvas#map.dragging { cursor: grabbing; }
+  #tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
+         border-radius: 6px; padding: 2px 6px; font-size: 12px; white-space: nowrap; display: none; }
+  #legend { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+  #legend canvas { height: 10px; width: 260px; border: 1px solid var(--line); border-radius: 3px; }
+  #status { margin-top: 6px; color: var(--muted); font-size: 12px; min-height: 2.9em; }
+  #status.error { color: #d70015; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; background: var(--panel); }
+  th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  tr.sel td { background: var(--hi); }
+  tr.pick { cursor: pointer; }
+  .scroll { overflow-x: auto; }
+  pre { margin: 0; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+        font-size: 12px; overflow-x: auto; white-space: pre; }
+  .hl { color: var(--accent); font-weight: 600; }
+  #series { width: 100%; height: 200px; display: block; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  code { font-size: 12px; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>A multidimensional VRT, read in the browser</h1>
+  <p class="lede">A GDAL multidimensional VRT (<code>mdim.vrt</code>) is a small XML file that stacks many files into one
+    array: dimensions, coordinates, units, scale and offset, and for each slice the file it comes from. This page fetches
+    one, parses it in plain JavaScript, and reads the slice you pick by doing what the VRT says: find the
+    <code>&lt;Source&gt;</code> whose <code>DestSlab</code> covers that index, open its COG with range requests
+    (<code>wxy-tiff</code> in WebAssembly), warp it onto the canvas (<code>wxy-warp</code>), and apply the VRT's
+    nodata, scale and offset. No GDAL, no tile server.</p>
+
+  <div class="url">
+    <input id="vrt" type="url" spellcheck="false" aria-label="mdim.vrt URL">
+    <button id="load">Load</button>
+  </div>
+  <div id="status">Loading wasm...</div>
+
+  <div class="row">
+    <label>array <select id="array"></select></label>
+    <label>projection <select id="proj"></select></label>
+    <label>resampling <select id="resampling">
+      <option value="near">nearest</option><option value="bilinear" selected>bilinear</option>
+      <option value="average">average</option><option value="mode">mode (categories)</option></select></label>
+  </div>
+  <div class="row">
+    <button id="prev" title="Previous step">&lt;</button>
+    <input type="range" id="t" min="0" max="0" value="0" aria-label="index on the first axis">
+    <button id="next" title="Next step">&gt;</button>
+    <span id="tlabel"></span>
+  </div>
+
+  <div class="stage">
+    <canvas id="map" width="1000" height="500"></canvas>
+    <div id="tip"></div>
+  </div>
+  <div id="legend"><span id="lo"></span><canvas id="bar" width="256" height="1"></canvas><span id="hi"></span>
+    <span id="units"></span>
+    <label>min <input type="number" id="vmin" step="any"></label>
+    <label>max <input type="number" id="vmax" step="any"></label></div>
+  <p class="hint">Drag to pan, scroll to zoom. Click for that cell through the steps either side of this one: each step is
+    another source, opened and read for one pixel.</p>
+
+  <svg id="series" viewBox="0 0 1000 200" preserveAspectRatio="none" role="img" aria-label="series at a point"></svg>
+  <div class="row hint"><label>series length <select id="slen">
+    <option>15</option><option selected>31</option><option>61</option><option>121</option></select></label>
+    <span id="sstat"></span></div>
+
+  <div class="cols">
+    <div>
+      <h2>This slice, from the VRT</h2>
+      <pre id="srcxml"></pre>
+      <p class="hint" id="check"></p>
+    </div>
+    <div>
+      <h2>Dimensions</h2>
+      <div class="scroll"><table id="dims"></table></div>
+      <h2>Arrays</h2>
+      <div class="scroll"><table id="arrays"></table></div>
+    </div>
+  </div>
+
+  <p class="hint">Give another multidimensional VRT with <code>?vrt=&lt;url&gt;</code>; its sources must be COGs
+    (<code>SourceBand</code>, a <code>/vsicurl/</code>, <code>/vsis3/</code> or relative path) served with CORS, the
+    last two dimensions y and x. netCDF and HDF5 sources are listed but not read here; for those see
+    <a href="bran.html">BRAN2023 from its byte table</a>. Also: <a href="cog.html">one COG, any projection</a>;
+    <a href="index.html">all examples</a>; <a href="https://wxylib.org/docs/">wxylib.org/docs</a>.</p>
+</main>
+<script type="module" src="mdim.js"></script>
+</body>
+</html>

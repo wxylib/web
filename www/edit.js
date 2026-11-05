@@ -7,8 +7,9 @@ import {
   dist, fromTheta, add, mul, sub, touch, apply, nudgeStart, nudgeStep, finishNudge,
   makeFrame, reframe, segmentPaths, bboxOf, featureCrossings,
 } from "./edit-core.js";
-import { makeGeo, direct, inverse } from "./edit-geo.js";
+import { makeGeo } from "./edit-geo.js";
 import { transects, cover, clip, lawnmower, repeat } from "./edit-pattern.js";
+import { SHAPE_KEY, shapeRing, shapeFromDrag, arcInfo } from "./edit-shape.js";
 
 // wxylib in wasm (proj4rs transforms, COG warp), when it has been built
 // into ./pkg; without it the canvas still edits, in data coordinates or
@@ -30,6 +31,7 @@ const S = {
   sel: null,          // { fid, ri, vi } (ri, vi null when only the feature is selected)
   drag: null,         // { kind: "vertex" | "mid" | "pan", ... }
   draft: [],          // vertices of the shape being drawn
+  shapeDraft: [],     // points clicked so far for an arc
   mouse: null,        // pointer in screen pixels
   hit: null,          // { snap, pt, guides } at the pointer
   pending: null,      // "perp" | "para": the next click picks a segment
@@ -125,6 +127,7 @@ function applyFrame(refit = false) {
     status("New frame: the edits made so far are kept; undo and the log start again here.");
   }
   S.geo = geo;
+  edgeOpts();
   $("frame").textContent = `${S.name}: ${S.doc.features.length} features. Edit frame: ${frame.label}.` +
     (geo ? "" : " No CRS, so ground measures are off.");
   for (const id of ["measure", "north", "edges"]) $(id).disabled = !geo;
@@ -215,15 +218,20 @@ function snapOpts() {
 
 // Geodesic edges: each segment drawn and snapped as the geodesic between
 // its vertices, densified to about 4 pixels.
+// The edge model: straight on the grid, or geodesics or loxodromes on
+// the ground. The geo's line follows it, so locked distances and
+// azimuths, the readout and patterns measure along the same edges.
 function edgeOpts() {
-  if (!S.geo || $("edges").value !== "geodesic") return {};
+  const e = $("edges").value;
+  if (S.geo) S.geo.line = e === "rhumb" ? "rhumb" : "geodesic";
+  if (!S.geo || e === "grid") return {};
   const geo = S.geo, maxLen = 4 * S.view.scale;
   return {
     curve: (a, b) => geo.curve(a, b, maxLen),
-    curveKey: "g" + maxLen.toPrecision(2),
+    curveKey: e[0] + maxLen.toPrecision(2),
     mid: (a, b) => {
-      const p = geo.toLL(a), q = geo.toLL(b), g = inverse(p[0], p[1], q[0], q[1]);
-      return g ? geo.fromLL(direct(p[0], p[1], g.az1, g.s / 2)) : mul(add(a, b), 0.5);
+      const p = geo.toLL(a), g = geo.lineInverse(p, geo.toLL(b));
+      return g ? geo.fromLL(geo.lineDirect(p, g.az, g.s / 2)) : mul(add(a, b), 0.5);
     },
   };
 }
@@ -426,6 +434,20 @@ cv.addEventListener("mousedown", (e) => {
     pointer(s[0], s[1]); draw();
     return;
   }
+  if (S.mode === "shape") {
+    pointer(s[0], s[1]);
+    const p = S.hit.pt.slice();
+    if ($("kKind").value === "arc") {
+      S.shapeDraft.push(p);
+      if (S.shapeDraft.length === 3) {
+        const [a, b, c] = S.shapeDraft.map((q) => S.doc.frame.inv(q));
+        S.shapeDraft = [];
+        createShape({ kind: "arc", a, b, c, n: shapeN() });
+      }
+    } else S.drag = { kind: "shape", origin: p, moved: false };
+    draw();
+    return;
+  }
   if (S.mode === "pattern") {
     pointer(s[0], s[1]);
     if ($("pKind").value !== "repeat") {
@@ -502,6 +524,11 @@ window.addEventListener("mouseup", () => {
   S.drag = null;
   if (d && d.kind === "nudge") { endNudge(d); return; }
   if (d && d.kind === "pattern") { draw(); return; }
+  if (d && d.kind === "shape") {
+    const sh = d.moved && S.hit && dragShape(d.origin, S.hit.pt);
+    if (sh && (sh.r > 0 || sh.w > 0)) createShape(sh); else draw();
+    return;
+  }
   if (!d || d.kind === "pan" || !d.moved || !S.hit) { draw(); return; }
   const to = S.hit.pt.slice();
   if (d.kind === "vertex") {
@@ -647,9 +674,10 @@ function patternDrag() {
   if (!o || !p || dist(o, p) === 0) return;
   let az, len;
   if (S.geo) {
-    const a = S.geo.toLL(o), b = S.geo.toLL(p), g = inverse(a[0], a[1], b[0], b[1]);
+    edgeOpts();
+    const g = S.geo.lineInverse(S.geo.toLL(o), S.geo.toLL(p));
     if (!g) return;
-    az = g.az1; len = g.s;
+    az = g.az; len = g.s;
   } else {
     az = ((90 - (Math.atan2(p[1] - o[1], p[0] - o[0]) * 180) / Math.PI) % 360 + 360) % 360;
     len = dist(o, p);
@@ -726,6 +754,126 @@ function createPattern() {
   S.hist.run(ops.length > 1 ? { op: "batch", ops } : ops[0]);
   status(`Created ${feats.length} feature${feats.length > 1 ? "s" : ""}.`);
   panels(); draw();
+}
+
+// ---- parametric shapes -------------------------------------------------------------------------
+
+// Circles, regular polygons and rectangles by press and drag; arcs by
+// three clicks (start, a point on the arc, end). Snapping applies to each
+// point. The parameters are kept in the feature's properties beside its
+// vertices: the Selected shape panel edits them and the vertices follow;
+// moving a vertex makes the feature plain geometry (undo restores it).
+const shapeGround = () => !!S.geo && $("measure").value === "ground";
+const shapeN = () => Math.max(2, Math.round(+$("kN").value || 72));
+
+function dragShape(p, q) {
+  edgeOpts();
+  const kind = $("kKind").value;
+  const sh = shapeFromDrag(kind, p, q, { n: kind === "ngon" ? Math.max(3, Math.round(+$("kSides").value || 6)) : shapeN(),
+    az: +$("kAz").value || 0, ground: shapeGround() }, S.geo, (x) => S.doc.frame.inv(x));
+  if (sh) sh.frame = S.doc.frame.crs || S.doc.frame.kind;
+  return sh;
+}
+
+function createShape(sh) {
+  if (!sh.frame) sh.frame = S.doc.frame.crs || S.doc.frame.kind;
+  const ring = shapeRing(sh, S.doc.frame, S.geo);
+  const f = { id: "new" + S.doc.next++, type: ring.type, props: { [SHAPE_KEY]: sh },
+    rings: [{ part: 0, closed: ring.closed, xy: ring.xy, src: ring.xy.map(() => null) }] };
+  S.hist.run({ op: "add", feature: f });
+  S.sel = { fid: f.id, ri: null, vi: null };
+  status(`Created a ${sh.kind}; its parameters are in the Selected shape panel.`);
+  panels(); draw();
+}
+
+// A shape's own edit: new parameters, new vertices, one undoable step.
+function editShape(f, sh) {
+  const ring = shapeRing(sh, S.doc.frame, S.geo);
+  const r0 = f.rings[0];
+  const after = { ...f.props, [SHAPE_KEY]: sh };
+  S.hist.run({ op: "batch", keepShape: true, ops: [
+    { op: "reshape", fid: f.id, ri: 0, before: { xy: r0.xy.map((p) => p.slice()), src: r0.src.slice() },
+      after: { xy: ring.xy, src: ring.xy.map(() => null) } },
+    { op: "props", fid: f.id, before: JSON.parse(JSON.stringify(f.props)), after }] });
+  panels(); draw();
+}
+
+function dropShape(f) {
+  const after = { ...f.props };
+  delete after[SHAPE_KEY];
+  S.hist.run({ op: "props", fid: f.id, before: JSON.parse(JSON.stringify(f.props)), after });
+  status(`${f.id} is plain geometry now.`);
+  panels(); draw();
+}
+
+// The Selected shape panel: one field per parameter.
+const SHAPE_FIELDS = {
+  circle: [["r", "radius"], ["n", "vertices"]],
+  ngon: [["r", "radius"], ["n", "sides"], ["rot", "first vertex azimuth"]],
+  rect: [["w", "width"], ["h", "height"], ["az", "azimuth"]],
+  arc: [["n", "segments"]],
+};
+
+function shapePanel(f) {
+  const box = $("shapeBox"), sh = f && f.props && f.props[SHAPE_KEY];
+  box.textContent = "";
+  if (!sh || !SHAPE_FIELDS[sh.kind]) { box.hidden = true; return; }
+  box.hidden = false;
+  const units = sh.ground && S.geo ? "metres on the ellipsoid, true azimuths" : "frame units, grid bearings";
+  const here = S.doc.frame.crs || S.doc.frame.kind;
+  const head = document.createElement("div");
+  head.className = "tiny";
+  head.textContent = `${sh.kind}, ${units}` + (sh.frame && sh.frame !== here && !sh.ground ? ` (made in ${sh.frame}; edits regenerate it here)` : "");
+  box.append(head);
+  for (const [key, label] of SHAPE_FIELDS[sh.kind]) {
+    const l = document.createElement("label");
+    const inp = document.createElement("input");
+    inp.type = "number"; inp.step = "any"; inp.value = sh[key]; inp.style.width = "100px";
+    inp.addEventListener("change", () => {
+      const v = parseFloat(inp.value);
+      if (!Number.isFinite(v)) return;
+      editShape(f, { ...sh, [key]: v });
+    });
+    l.append(`${label} `, inp);
+    const row = document.createElement("div");
+    row.className = "row";
+    row.append(l);
+    box.append(row);
+  }
+  if (sh.kind === "arc") {
+    const a = arcInfo(sh, S.doc.frame);
+    if (a) { const d = document.createElement("div"); d.className = "tiny"; d.textContent = `radius ${fmt(a.r)}, sweep ${fmt(a.sweep, 4)} deg, length ${fmt(a.length)}`; box.append(d); }
+  }
+  const b = document.createElement("button");
+  b.textContent = "Make plain geometry";
+  b.onclick = () => dropShape(f);
+  box.append(b);
+}
+
+function drawShapePreview(c) {
+  let ring = null, pts = [];
+  if ($("kKind").value === "arc") {
+    pts = S.shapeDraft.slice();
+    const p = S.hit && S.hit.pt;
+    if (pts.length === 2 && p) {
+      const [a, b] = pts.map((q) => S.doc.frame.inv(q));
+      ring = shapeRing({ kind: "arc", a, b, c: S.doc.frame.inv(p), n: shapeN() }, S.doc.frame, S.geo);
+    } else if (pts.length === 1 && p) ring = { xy: [pts[0], p], closed: false };
+  } else if (S.drag && S.drag.kind === "shape" && S.hit) {
+    const sh = dragShape(S.drag.origin, S.hit.pt);
+    if (sh) ring = shapeRing(sh, S.doc.frame, S.geo);
+    pts = [S.drag.origin];
+  }
+  ctx.save();
+  ctx.strokeStyle = c.draft; ctx.fillStyle = c.draft; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+  if (ring) {
+    ctx.beginPath();
+    ring.xy.forEach((p, i) => { const s = toScreen(p); i ? ctx.lineTo(s[0], s[1]) : ctx.moveTo(s[0], s[1]); });
+    if (ring.closed) ctx.closePath();
+    ctx.stroke();
+  }
+  for (const p of pts) { const s = toScreen(p); ctx.beginPath(); ctx.arc(s[0], s[1], 3.5, 0, 2 * Math.PI); ctx.fill(); }
+  ctx.restore();
 }
 
 // ---- the nudge brush ----------------------------------------------------------------------
@@ -861,6 +1009,7 @@ window.addEventListener("keydown", (e) => {
   else if (k === "4") setMode("Polygon");
   else if (k === "5") setMode("nudge");
   else if (k === "6") setMode("pattern");
+  else if (k === "7") setMode("shape");
   else if (k === "[" || k === "]") {
     const el = $("nSize");
     el.value = Math.max(4, Math.min(200, Math.round((+el.value || 30) * (k === "]" ? 1.25 : 0.8))));
@@ -878,6 +1027,7 @@ window.addEventListener("keydown", (e) => {
   else if (k === "escape") {
     if (S.pending) { S.pending = null; status(""); }
     else if (S.draft.length) S.draft = [];
+    else if (S.shapeDraft.length) S.shapeDraft = [];
     else if (anyLocked()) unlockAll();
     else { S.sel = null; panels(); }
   } else if (k === "backspace" && S.draft.length) { e.preventDefault(); S.draft.pop(); }
@@ -890,7 +1040,7 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("keyup", (e) => { if (e.key === " ") S.space = false; });
 
 function setMode(m) {
-  S.mode = m; S.draft = [];
+  S.mode = m; S.draft = []; S.shapeDraft = [];
   for (const b of document.querySelectorAll(".modes button")) b.classList.toggle("on", b.dataset.mode === m);
   cv.focus();
   draw();
@@ -1010,7 +1160,9 @@ function draw() {
     if (f) {
       f.rings.forEach((r, ri) => {
         const xy = previewRing(f.id, ri, r);
-        if (S.mode === "edit" && xy.length > 1) {
+        // a shape's vertices are its output: small marks, no midpoints
+        const shaped = !!(f.props && f.props[SHAPE_KEY]);
+        if (S.mode === "edit" && xy.length > 1 && !shaped) {
           ctx.fillStyle = c.muted;
           for (const [a, b] of segments({ xy, closed: r.closed })) {
             const m = toScreen(midOf(xy[a], xy[b]));
@@ -1024,7 +1176,7 @@ function draw() {
           ctx.fillStyle = picked ? c.accent : edited ? c.edited : c.canvas;
           ctx.strokeStyle = picked ? c.accent : edited ? c.edited : c.fg;
           ctx.lineWidth = 1.2;
-          if (S.mode === "nudge") { ctx.fillStyle = ctx.strokeStyle; ctx.fillRect(s[0] - 1.5, s[1] - 1.5, 3, 3); return; }
+          if (S.mode === "nudge" || shaped) { ctx.fillStyle = ctx.strokeStyle; ctx.fillRect(s[0] - 1.5, s[1] - 1.5, 3, 3); return; }
           ctx.fillRect(s[0] - 3.5, s[1] - 3.5, 7, 7);
           ctx.strokeRect(s[0] - 3.5, s[1] - 3.5, 7, 7);
         });
@@ -1056,6 +1208,7 @@ function draw() {
   }
   if (S.mode === "nudge") drawBrush(c);
   if (S.mode === "pattern") drawPattern(c);
+  if (S.mode === "shape") drawShapePreview(c);
   readout();
 }
 
@@ -1117,8 +1270,8 @@ function readout() {
     const th = Math.atan2(p[1] - ref[1], p[0] - ref[0]);
     parts.push(`d ${fmt(dist(ref, p))}  a ${fmt(fromTheta(th, $("conv").value), 4)}`);
     if (S.geo && dist(ref, p) > 0) {
-      const a = S.geo.toLL(ref), b = S.geo.toLL(p), g = inverse(a[0], a[1], b[0], b[1]);
-      if (g) parts.push(`ground ${fmt(g.s)}  true az ${fmt(g.az1, 4)}`);
+      const g = S.geo.lineInverse(S.geo.toLL(ref), S.geo.toLL(p));
+      if (g) parts.push(`ground ${fmt(g.s)}  ${S.geo.line === "rhumb" ? "heading" : "true az"} ${fmt(g.az, 4)}`);
     }
   }
   if (S.geo && p) parts.push(`k ${fmt(S.geo.scale(p), 6)}  conv ${fmt(S.geo.convergence(p), 4)}`);
@@ -1134,6 +1287,7 @@ function panels() {
   const f = S.sel && featureById(S.doc, S.sel.fid);
   if (!f) {
     info.textContent = "Nothing selected.";
+    shapePanel(null);
     box.hidden = true;
   } else {
     const nv = f.rings.reduce((s, r) => s + r.xy.length, 0);
@@ -1143,9 +1297,10 @@ function panels() {
     else if (f.type.endsWith("LineString")) m = `length ${fmt(f.rings.reduce((s, r) => s + ringLength(r), 0), 3)}`;
     const nx = f.type === "Point" || f.type === "MultiPoint" ? 0 : featureCrossings(f).length;
     if (nx) m += `${m ? ", " : ""}${nx} crossing${nx > 1 ? "s" : ""} (${f.type.endsWith("Polygon") ? "invalid" : "not simple"})`;
-    const props = Object.entries(f.props || {}).map(([k, v]) => `${k}: ${v}`).join(", ");
+    const props = Object.entries(f.props || {}).filter(([k]) => k !== SHAPE_KEY).map(([k, v]) => `${k}: ${v}`).join(", ");
     info.textContent = `${f.id} (${f.type}), ${nv} vertices, ${ne} edited${m ? ", " + m : ""}${props ? "\n" + props : ""}`;
     coordTable(f);
+    shapePanel(f);
     box.hidden = false;
   }
   const n = S.hist ? S.hist.done.length : 0;
@@ -1212,7 +1367,7 @@ for (const id of ["srcCrs", "editCrs"]) $(id).addEventListener("keydown", (e) =>
 $("loadCog").onclick = () => loadCog($("cogUrl").value.trim());
 $("cogUrl").addEventListener("keydown", (e) => { if (e.key === "Enter") $("loadCog").click(); });
 $("opacity").oninput = () => draw();
-for (const id of ["measure", "north", "edges"]) $(id).onchange = () => { touchAll(); draw(); };
+for (const id of ["measure", "north", "edges"]) $(id).onchange = () => { edgeOpts(); touchAll(); draw(); };
 $("file").onchange = (e) => e.target.files[0] && loadFile(e.target.files[0]);
 $("load").onclick = () => $("url").value && loadUrl($("url").value.trim());
 $("url").addEventListener("keydown", (e) => { if (e.key === "Enter") $("load").click(); });

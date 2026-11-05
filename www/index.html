@@ -72,6 +72,24 @@
           year at one place. Plain JavaScript: the table needs no library to read.</p>
       </div>
     </a>
+    <a class="card" href="mdim.html">
+      <img src="img/mdim.jpg" alt="GHRSST MUR sea surface temperature for one day, read through its multidimensional VRT">
+      <div>
+        <h2>A multidimensional VRT, read in the browser</h2>
+        <p>GHRSST MUR, 2002 to now, as one GDAL mdim.vrt of 38,360 COGs on source.coop: the VRT parsed in plain
+          JavaScript, each day's source found from its DestSlab, read and warped in wasm. Step through days, any
+          projection, click for a month at one cell.</p>
+      </div>
+    </a>
+    <a class="card" href="vrt.html">
+      <img src="img/vrt.jpg" alt="A nested VRT read as four source windows into a 10 by 7 buffer, and the nine COG tiles a vrt:// window needs">
+      <div>
+        <h2>What is in a VRT?</h2>
+        <p>Give it any VRT, a vrt:// string, or paste one: what kind it is (classic, warped, pixel functions, mdim,
+          vector), what every element does, how each source is named, and for a classic raster which source windows and
+          tiles a read touches. The planner is vrt-model in wasm, byte-identical to GDAL on the VRT corpus.</p>
+      </div>
+    </a>
     <a class="card" href="edit.html">
       <img src="img/edit.jpg" alt="Drawing a line perpendicular to a road from a parcel corner, with snapping and an angle lock">
       <div>
@@ -82,7 +100,7 @@
       </div>
     </a>
     <a class="card" href="vrt-vector.html">
-      <img src="img/vrt.jpg" alt="US counties read through a vector VRT from a FlatGeobuf file, by the map view">
+      <img src="img/vrt-vector.jpg" alt="US counties read through a vector VRT from a FlatGeobuf file, by the map view">
       <div>
         <h2>A vector VRT, read in the browser</h2>
         <p>Open an OGR VRT and draw the layers it describes from CSV, GeoJSON, FlatGeobuf and GeoParquet over HTTP:

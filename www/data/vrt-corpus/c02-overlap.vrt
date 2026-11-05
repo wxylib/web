@@ -1,0 +1,20 @@
+<VRTDataset rasterXSize="40" rasterYSize="30">
+  <SRS dataAxisToSRSAxisMapping="2,1">EPSG:4326</SRS>
+  <GeoTransform>100.0, 1.0, 0.0, -10.0, 0.0, -1.0</GeoTransform>
+  <VRTRasterBand dataType="Byte" band="1">
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">src/tile0.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SourceProperties RasterXSize="20" RasterYSize="15" DataType="Byte" BlockXSize="20" BlockYSize="1"/>
+      <SrcRect xOff="0" yOff="0" xSize="20" ySize="15"/>
+      <DstRect xOff="0" yOff="0" xSize="20" ySize="15"/>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">src/tile3.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SourceProperties RasterXSize="20" RasterYSize="15" DataType="Byte" BlockXSize="20" BlockYSize="1"/>
+      <SrcRect xOff="0" yOff="0" xSize="20" ySize="15"/>
+      <DstRect xOff="10" yOff="8" xSize="20" ySize="15"/>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>

@@ -1,0 +1,55 @@
+<VRTDataset rasterXSize="16" rasterYSize="12">
+  <SRS dataAxisToSRSAxisMapping="2,1">EPSG:4326</SRS>
+  <GeoTransform>0, 1, 0, 12, 0, -1</GeoTransform>
+  <VRTRasterBand dataType="Float32" band="1" subClass="VRTDerivedRasterBand">
+    <Description>normalised difference of green and red</Description>
+    <PixelFunctionType>norm_diff</PixelFunctionType>
+    <SourceTransferType>Float32</SourceTransferType>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">../vrt-corpus/src/rgb.tif</SourceFilename>
+      <SourceBand>2</SourceBand>
+      <SourceProperties RasterXSize="16" RasterYSize="12" DataType="Byte"/>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">../vrt-corpus/src/rgb.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SourceProperties RasterXSize="16" RasterYSize="12" DataType="Byte"/>
+    </SimpleSource>
+  </VRTRasterBand>
+  <VRTRasterBand dataType="Float32" band="2" subClass="VRTDerivedRasterBand">
+    <Description>mean of the three bands, by expression</Description>
+    <PixelFunctionType>expression</PixelFunctionType>
+    <PixelFunctionArguments expression="(B1 + B2 + B3) / 3" dialect="muparser"/>
+    <SourceTransferType>Float32</SourceTransferType>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">../vrt-corpus/src/rgb.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SourceProperties RasterXSize="16" RasterYSize="12" DataType="Byte"/>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">../vrt-corpus/src/rgb.tif</SourceFilename>
+      <SourceBand>2</SourceBand>
+      <SourceProperties RasterXSize="16" RasterYSize="12" DataType="Byte"/>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">../vrt-corpus/src/rgb.tif</SourceFilename>
+      <SourceBand>3</SourceBand>
+      <SourceProperties RasterXSize="16" RasterYSize="12" DataType="Byte"/>
+    </SimpleSource>
+  </VRTRasterBand>
+  <VRTRasterBand dataType="Float32" band="3" subClass="VRTDerivedRasterBand">
+    <Description>sum of two bands plus 100</Description>
+    <PixelFunctionType>sum</PixelFunctionType>
+    <PixelFunctionArguments k="100"/>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">../vrt-corpus/src/rgb.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SourceProperties RasterXSize="16" RasterYSize="12" DataType="Byte"/>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">../vrt-corpus/src/rgb.tif</SourceFilename>
+      <SourceBand>3</SourceBand>
+      <SourceProperties RasterXSize="16" RasterYSize="12" DataType="Byte"/>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>

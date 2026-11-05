@@ -114,11 +114,12 @@
     </div>
     <div class="row">
       <label>edges <select id="edges"><option value="grid">straight on the grid</option>
-        <option value="geodesic">geodesics</option></select></label>
+        <option value="geodesic">geodesics</option><option value="rhumb">loxodromes (rhumb lines)</option></select></label>
     </div>
     <p class="hint">Ellipsoid distances use the point scale factor (exact geodesic when angle and distance are both
-      locked); true north applies the grid convergence. Geodesic edges are drawn and snapped as the curve between the
-      vertices. The readout shows ground distance, true azimuth, k and convergence.</p>
+      locked); true north applies the grid convergence. Geodesic or loxodrome (constant heading) edges are drawn and snapped as the curve between the
+      vertices; locked distances and azimuths, the readout and patterns follow the same edges. The readout shows ground
+      distance, true azimuth (or the heading of a loxodrome), k and convergence.</p>
     <div class="row">
       <input id="cogUrl" type="url" placeholder="underlay COG URL (CORS)">
       <button id="loadCog">Underlay</button>
@@ -135,6 +136,7 @@
       <button data-mode="Polygon" title="Draw a polygon (4)">Polygon</button>
       <button data-mode="nudge" title="Nudge brush (5)">Nudge</button>
       <button data-mode="pattern" title="Field patterns (6)">Pattern</button>
+      <button data-mode="shape" title="Parametric shapes (7)">Shape</button>
     </div>
     <div class="row">
       <button id="undo" title="Ctrl+Z">Undo</button>
@@ -167,6 +169,25 @@
       </select> deg</label>
       <label><input type="checkbox" id="bearingRel"> relative</label>
     </div>
+
+    <h2>Shapes <span class="tiny">(<kbd>7</kbd>)</span></h2>
+    <div class="row">
+      <select id="kKind">
+        <option value="circle">circle (centre, drag radius)</option>
+        <option value="ngon">regular polygon (centre, drag to a vertex)</option>
+        <option value="rect">rectangle (corner, drag diagonal)</option>
+        <option value="arc">arc (start, through, end)</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>vertices <input id="kN" type="number" value="72" min="2" step="1" style="width:60px"></label>
+      <label>sides <input id="kSides" type="number" value="6" min="3" step="1" style="width:52px"></label>
+      <label>axis <input id="kAz" type="number" value="0" step="any" style="width:64px"> deg</label>
+    </div>
+    <p class="hint">Snapping applies to every point. With a CRS and distances on the ellipsoid, radius, width and
+      height are metres on the ground and azimuths are true; each vertex is placed on the ellipsoid. A shape keeps its
+      parameters beside its vertices: edit them under Selected feature and the vertices follow. Moving a vertex makes
+      it plain geometry; undo brings the shape back.</p>
 
     <h2>Field patterns <span class="tiny">(<kbd>6</kbd>)</span></h2>
     <div class="row">
@@ -251,6 +272,7 @@
 
     <h2>Selected feature</h2>
     <div id="info">Nothing selected.</div>
+    <div id="shapeBox" hidden></div>
     <div id="coords" hidden></div>
 
     <h2>Edits</h2>

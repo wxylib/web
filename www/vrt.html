@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wxylib VRT explorer</title>
+<style>
+  :root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --panel: #ffffff; --accent: #1f5fa8; --hi: #fff4c2;
+          --warn: #a35200; --chip: #eef2f8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161618; --fg: #f2f2f2; --muted: #a1a1a6; --line: #3a3a3c; --panel: #1f1f22; --accent: #7fb0e8; --hi: #3d3518;
+            --warn: #ffb066; --chip: #26303d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 16px 40px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 22px 0 6px; }
+  h3 { font-size: 14px; margin: 14px 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 12px; max-width: 860px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 8px 0; }
+  .row label { display: flex; gap: 6px; align-items: center; }
+  select, button, input, textarea { font: inherit; color: var(--fg); background: var(--panel);
+                          border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+  input[type=number] { width: 80px; }
+  button { cursor: pointer; }
+  .url { display: flex; gap: 6px; flex-wrap: wrap; }
+  .url input { flex: 1 1 320px; min-width: 0; }
+  .url select { max-width: 100%; }
+  textarea { width: 100%; height: 120px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #status { margin-top: 6px; color: var(--muted); font-size: 12px; min-height: 1.5em; }
+  #status.error { color: #d70015; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; background: var(--panel); }
+  th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  tr.pick { cursor: pointer; }
+  tr.pick:hover td { background: var(--hi); }
+  tr.unk td { color: var(--warn); }
+  .scroll { overflow-x: auto; }
+  pre { margin: 0; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+        font-size: 12px; overflow: auto; white-space: pre; max-height: 480px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .warn { color: var(--warn); }
+  code { font-size: 12px; overflow-wrap: anywhere; }
+  a { color: var(--accent); }
+  .fam { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .fam b { font-size: 16px; }
+  .fam p { margin: 4px 0; }
+  .caps { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; margin-top: 8px; }
+  .cap { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; padding: 5px 8px; font-size: 12px; }
+  .cap b { display: block; font-size: 13px; }
+  .cap span { color: var(--muted); }
+  .chip { display: inline-block; border-radius: 4px; padding: 0 4px; margin: 1px 2px 1px 0; background: var(--chip);
+          font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+  .chip.vsi { background: #dbe8ff; color: #123c7a; }
+  .chip.drv { background: #e6dcff; color: #3d1f86; }
+  .chip.sub { background: #f3e2ff; color: #5b1f7e; }
+  .chip.vrts, .chip.vrtf { background: #ffe7c7; color: #7a3d00; }
+  .chip.opt { background: #fff3b0; color: #5c4800; }
+  @media (prefers-color-scheme: dark) {
+    .chip.vsi { background: #1d3557; color: #cfe0ff; } .chip.drv { background: #33285a; color: #ded2ff; }
+    .chip.sub { background: #44295a; color: #f0d8ff; } .chip.vrts, .chip.vrtf { background: #4a3215; color: #ffe1bb; }
+    .chip.opt { background: #44391a; color: #fff0b0; }
+  }
+  .nest { color: var(--muted); }
+  td.name { max-width: 420px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  svg.fig { width: 100%; max-width: 520px; height: auto; display: block; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  svg.strip { width: 100%; max-width: 520px; height: auto; display: block; margin: 6px 0; }
+  svg .frame { fill: none; stroke: var(--muted); stroke-width: 1; }
+  svg .req { fill: none; stroke: var(--fg); stroke-width: 2; }
+  svg .srect { fill: var(--accent); fill-opacity: .15; stroke: var(--accent); stroke-width: 1.5; }
+  svg .blk { fill: none; stroke: var(--line); stroke-width: .6; }
+  svg .blk.on { fill: #f28e2b; fill-opacity: .45; stroke: #f28e2b; }
+  svg .px { stroke: var(--line); stroke-width: .4; }
+  svg .lbl { font: 11px system-ui, sans-serif; fill: var(--fg); text-anchor: middle; }
+  svg .ax { font: 11px system-ui, sans-serif; fill: var(--muted); }
+  #tree details { margin-left: 14px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #tree > details { margin-left: 0; }
+  #tree summary { cursor: pointer; padding: 1px 0; }
+  #tree details.leaf > summary { list-style: none; cursor: default; }
+  #tree details.leaf > summary::-webkit-details-marker { display: none; }
+  #tree details.leaf > summary::before { content: ""; display: inline-block; width: 1em; }
+  #tree .tag { color: var(--accent); }
+  #tree .an { color: #8a4f00; }
+  #tree .av { color: #2f7d32; }
+  @media (prefers-color-scheme: dark) { #tree .an { color: #ffc27a; } #tree .av { color: #9ad59c; } }
+  #tree .tv { color: var(--fg); }
+  #tree .ex { color: var(--muted); font: 11px system-ui, sans-serif; margin-left: 6px; }
+  #tree .more { margin-left: 30px; color: var(--muted); font: 12px system-ui, sans-serif; }
+  .ex-name { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2px 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #nm { width: 100%; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  details.box > summary { cursor: pointer; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>What is in a VRT?</h1>
+  <p class="lede">A VRT is a small document that describes a dataset made of other datasets. There are four kinds: classic
+    rasters (mosaics, band stacks, subsets, rescaling, pixel functions, warps), <code>vrt://</code> strings, multidimensional
+    arrays, and vector layers. Give this page one, by URL, as a <code>vrt://</code> string, or pasted, and it says what kind it is,
+    what every element does, which sources it names and how, and for a classic raster what a read would touch: the source
+    windows, where they land, the operations on the way, and the source tiles under them.</p>
+  <p class="lede">The model and planner are <a href="https://github.com/wxylib/core/tree/main/crates/vrt-model">vrt-model</a>
+    in WebAssembly, the same code that matches GDAL byte for byte on the
+    <a href="https://github.com/wxylib/fixtures/tree/main/vrt">VRT corpus</a>. They read nothing. This page reads the document,
+    any nested VRTs, and source headers when you ask (one or two range requests each). No pixels are read.</p>
+
+  <div class="url">
+    <input id="src" type="text" spellcheck="false" aria-label="VRT URL or vrt:// string" placeholder="https://.../file.vrt or vrt://...">
+    <button id="go">Explore</button>
+    <select id="examples" aria-label="Examples"></select>
+  </div>
+  <details class="box"><summary>or paste a document</summary>
+    <textarea id="paste" spellcheck="false" placeholder="&lt;VRTDataset ...&gt;"></textarea>
+    <button id="pastego">Explore the pasted document</button>
+    <span class="hint">Relative source names resolve against this page.</span>
+  </details>
+  <div id="status">Loading ...</div>
+
+  <div id="out" hidden>
+    <h2>What this is</h2>
+    <div id="family"></div>
+    <div id="caps" class="caps"></div>
+
+    <section id="s-vrtstring" hidden>
+      <h2>The vrt:// string</h2>
+      <div id="vrtstring" class="scroll"></div>
+    </section>
+
+    <section id="s-classic" hidden>
+      <h2>Grid</h2>
+      <div id="grid" class="scroll"></div>
+      <h2>Bands</h2>
+      <div id="bands" class="scroll"></div>
+      <h2>Sources</h2>
+      <div class="row">
+        <label>show <select id="bandsel"></select></label>
+        <button id="hdrbtn" title="One or two range requests per source">Read source headers</button>
+        <span class="hint">Click a source to see its own pixel grid.</span>
+      </div>
+      <div class="cols">
+        <div><div id="layout"></div><p class="hint">Where each source lands in the VRT's grid (its DstRect).</p></div>
+        <div><div id="srcspace"></div></div>
+      </div>
+      <div id="sources" class="scroll"></div>
+
+      <h2>What a read touches</h2>
+      <p class="hint">A read asks for a window of the VRT into a buffer of some size. The planner works out, for each source,
+        the window of the source it needs, the whole pixels it asks for, and where they land in the buffer, through any nesting.
+        It follows the reference library's window arithmetic and nearest-neighbour sampling exactly.</p>
+      <div class="row">
+        <label>band <select id="pband"></select></label>
+        <label>x <input id="rx" type="number" min="0"></label>
+        <label>y <input id="ry" type="number" min="0"></label>
+        <label>width <input id="rw" type="number" min="1"></label>
+        <label>height <input id="rh" type="number" min="1"></label>
+        <label>into <input id="bx" type="number" min="1"> x <input id="by" type="number" min="1"></label>
+        <button id="planbtn">Plan</button>
+      </div>
+      <div class="cols">
+        <div id="buffer"></div>
+        <div class="hint"><p>Each coloured box is one read landing in the buffer. Where boxes overlap, the later source wins, as in the
+          reference library. Read the source headers to see which tiles or strips of each source a read needs (in the source grid
+          beside the layout).</p>
+          <p>Tiles shown are at full resolution. For a reduced read the reference library may use a source overview instead, a choice
+          the document does not state.</p></div>
+      </div>
+      <div id="plan" class="scroll"></div>
+    </section>
+
+    <section id="s-mdim" hidden>
+      <h2>Groups and dimensions</h2>
+      <div id="mgroups" class="scroll"></div>
+      <h2>Arrays</h2>
+      <div id="marrays" class="scroll"></div>
+      <h2>Sources</h2>
+      <div id="msources" class="scroll"></div>
+    </section>
+
+    <section id="s-vector" hidden>
+      <h2>Layers</h2>
+      <div id="vlayers" class="scroll"></div>
+    </section>
+
+    <section id="s-census" hidden>
+      <h2>Every element used</h2>
+      <div id="census" class="scroll"></div>
+    </section>
+
+    <section id="s-tree" hidden>
+      <h2>The document as a tree</h2>
+      <p class="hint">Open any element. Long runs of one element show the first three and the last.</p>
+      <div id="tree" class="scroll"></div>
+    </section>
+
+    <section id="s-text" hidden>
+      <details class="box"><summary>The document as text</summary><pre id="doc"></pre></details>
+    </section>
+  </div>
+
+  <h2>Read a source name</h2>
+  <p class="hint">The VRT schemas type a source name as a plain string. Its grammar (paths, URLs, <code>/vsi</code> chains,
+    driver prefixes with subdatasets, <code>vrt://</code> strings) is read here by vrt-model.</p>
+  <input id="nm" type="text" spellcheck="false" aria-label="Source name">
+  <div id="nmex"></div>
+  <div id="nmout"></div>
+
+  <p class="hint" style="margin-top:24px">Source: <a href="https://github.com/wxylib/web">wxylib/web</a> (<code>www/vrt.html</code>).
+    Design: <a href="https://wxylib.org/docs/design/docs/m25-vrt-engine.html">m25, a VRT engine outside GDAL</a>.</p>
+</main>
+<script type="module" src="vrt.js"></script>
+</body>
+</html>

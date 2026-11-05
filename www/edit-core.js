@@ -451,7 +451,8 @@ export function constrain(cursor, ref, prevTheta, cs, snapSeg = null, geo = null
     let pt;
     if (cs.d.on && ground) {
       const ll = geo.toLL(ref);
-      pt = geo.fromLL(direct(ll[0], ll[1], az ?? geo.trueAz(ref, theta), cs.d.val));
+      pt = geo.fromLL(geo.lineDirect ? geo.lineDirect(ll, az ?? geo.trueAz(ref, theta), cs.d.val)
+        : direct(ll[0], ll[1], az ?? geo.trueAz(ref, theta), cs.d.val));
     } else if (cs.d.on) pt = add(ref, mul(dir, cs.d.val));
     else if (X != null && Math.abs(dir[0]) > 1e-12) pt = add(ref, mul(dir, (X - ref[0]) / dir[0]));
     else if (Y != null && Math.abs(dir[1]) > 1e-12) pt = add(ref, mul(dir, (Y - ref[1]) / dir[1]));
@@ -506,6 +507,11 @@ export function prevDirection(xy, i, closed) {
 //   { op: "remove", feature, index }
 //   { op: "batch",  ops }
 //   { op: "reshape", fid, ri, before: { xy, src }, after: { xy, src } }
+//   { op: "props",  fid, before, after }  (the whole properties object)
+//
+// A batch may carry keepShape: true when it is a parametric shape's own
+// edit; any other change to a shaped feature's vertices makes it plain
+// geometry (History adds the props op that drops the shape).
 
 export function apply(doc, op) {
   switch (op.op) {
@@ -548,6 +554,9 @@ export function apply(doc, op) {
     case "batch":
       for (const o of op.ops) apply(doc, o);
       break;
+    case "props":
+      featureById(doc, op.fid).props = JSON.parse(JSON.stringify(op.after));
+      break;
     case "reshape": {
       const r = featureById(doc, op.fid).rings[op.ri];
       r.xy = op.after.xy.map((p) => p.slice());
@@ -568,6 +577,7 @@ export function invert(op) {
     case "remove": return { op: "add", feature: op.feature, index: op.index };
     case "batch": return { op: "batch", ops: op.ops.map(invert).reverse() };
     case "reshape": return { op: "reshape", fid: op.fid, ri: op.ri, before: op.after, after: op.before };
+    case "props": return { op: "props", fid: op.fid, before: op.after, after: op.before };
   }
 }
 
@@ -582,9 +592,13 @@ export function clone(f) {
 // A history: the applied operations and the ones undone, for redo.
 export class History {
   constructor(doc) { this.doc = doc; this.done = []; this.undone = []; }
-  run(op) { apply(this.doc, op); this.done.push(op); this.undone = []; return op; }
+  run(op) { apply(this.doc, op); return this.record(op); }
   // An operation already applied to the document (a nudge stroke).
-  record(op) { this.done.push(op); this.undone = []; return op; }
+  record(op) {
+    const drop = demotions(this.doc, op);
+    if (drop.length) { for (const d of drop) apply(this.doc, d); op = { op: "batch", ops: [op, ...drop] }; }
+    this.done.push(op); this.undone = []; return op;
+  }
   undo() {
     const op = this.done.pop();
     if (!op) return null;
@@ -606,6 +620,28 @@ export class History {
   log() {
     return this.done.map((o) => JSON.stringify(o, (k, v) => (k[0] === "_" ? undefined : v))).join("\n");
   }
+}
+
+// The props ops that make shaped features plain geometry after op has
+// changed their vertices (an op that is a shape's own edit excepted).
+const SHAPE = "wxy:shape";
+function demotions(doc, op) {
+  const fids = new Set();
+  const visit = (o) => {
+    if (o.keepShape) return;
+    if (o.op === "batch") o.ops.forEach(visit);
+    else if (["move", "insert", "delete", "reshape"].includes(o.op)) fids.add(o.fid);
+  };
+  visit(op);
+  const out = [];
+  for (const fid of fids) {
+    const f = featureById(doc, fid);
+    if (!f || !f.props || !(SHAPE in f.props)) continue;
+    const after = { ...f.props };
+    delete after[SHAPE];
+    out.push({ op: "props", fid, before: JSON.parse(JSON.stringify(f.props)), after });
+  }
+  return out;
 }
 
 // Minimum vertex counts, so a delete cannot leave a broken ring.

@@ -13,10 +13,13 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # wxylib/core pinned by git rev; bump together.
-wxy-domain = { git = "https://github.com/wxylib/core", rev = "caba7b2ff19cc97dde505eed6fae6145ef9692aa" }
-wxy-source = { git = "https://github.com/wxylib/core", rev = "caba7b2ff19cc97dde505eed6fae6145ef9692aa" }
-wxy-tiff = { git = "https://github.com/wxylib/core", rev = "caba7b2ff19cc97dde505eed6fae6145ef9692aa" }
-wxy-warp = { git = "https://github.com/wxylib/core", rev = "caba7b2ff19cc97dde505eed6fae6145ef9692aa" }
+wxy-domain = { git = "https://github.com/wxylib/core", rev = "242562f0467c234dc510b4e52fa29f2ce81374f8" }
+wxy-source = { git = "https://github.com/wxylib/core", rev = "242562f0467c234dc510b4e52fa29f2ce81374f8" }
+wxy-tiff = { git = "https://github.com/wxylib/core", rev = "242562f0467c234dc510b4e52fa29f2ce81374f8" }
+wxy-warp = { git = "https://github.com/wxylib/core", rev = "242562f0467c234dc510b4e52fa29f2ce81374f8" }
+# the VRT model and planner, for the VRT discovery page
+vrt-model = { git = "https://github.com/wxylib/core", rev = "242562f0467c234dc510b4e52fa29f2ce81374f8" }
+serde_json = "1"
 # the same rwarp wxy-warp pins, for CRS transforms of the source outline
 rwarp = { version = "0.3", default-features = false, features = ["proj4rs"] }
 # same version wxy-tiff uses, for the AsyncFileReader trait
