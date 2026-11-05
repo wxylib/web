@@ -75,6 +75,10 @@
   svg .srect { fill: var(--accent); fill-opacity: .15; stroke: var(--accent); stroke-width: 1.5; }
   svg .blk { fill: none; stroke: var(--line); stroke-width: .6; }
   svg .blk.on { fill: #f28e2b; fill-opacity: .45; stroke: #f28e2b; }
+  svg .pick { fill: none; stroke: #d70015; stroke-width: 2; }
+  svg.pickable { cursor: crosshair; }
+  tr.fold { display: none; }
+  tr.pick.on td { background: var(--hi); }
   svg .px { stroke: var(--line); stroke-width: .4; }
   svg .lbl { font: 11px system-ui, sans-serif; fill: var(--fg); text-anchor: middle; }
   svg .ax { font: 11px system-ui, sans-serif; fill: var(--muted); }
@@ -143,7 +147,7 @@
         <span class="hint">Click a source to see its own pixel grid.</span>
       </div>
       <div class="cols">
-        <div><div id="layout"></div><p class="hint">Where each source lands in the VRT's grid (its DstRect).</p></div>
+        <div><div id="layout"></div><p class="hint">Where each source lands in the VRT's grid (its DstRect).</p><p id="picked" class="hint"></p></div>
         <div><div id="srcspace"></div></div>
       </div>
       <div id="sources" class="scroll"></div>

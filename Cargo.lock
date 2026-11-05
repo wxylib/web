@@ -1777,7 +1777,7 @@ checksum = "9deb2ef3cab718e534d28b39808182f57a0d77db172eedc8c18fbea14d1d545e"
 [[package]]
 name = "vrt-model"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=242562f0467c234dc510b4e52fa29f2ce81374f8#242562f0467c234dc510b4e52fa29f2ce81374f8"
+source = "git+https://github.com/wxylib/core?rev=14aa692ef75c6db422e427705bf5091e41d51396#14aa692ef75c6db422e427705bf5091e41d51396"
 dependencies = [
  "quick-xml 0.38.4",
  "thiserror",
@@ -2080,7 +2080,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 [[package]]
 name = "wxy-domain"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=242562f0467c234dc510b4e52fa29f2ce81374f8#242562f0467c234dc510b4e52fa29f2ce81374f8"
+source = "git+https://github.com/wxylib/core?rev=14aa692ef75c6db422e427705bf5091e41d51396#14aa692ef75c6db422e427705bf5091e41d51396"
 dependencies = [
  "vaster",
 ]
@@ -2088,7 +2088,7 @@ dependencies = [
 [[package]]
 name = "wxy-source"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=242562f0467c234dc510b4e52fa29f2ce81374f8#242562f0467c234dc510b4e52fa29f2ce81374f8"
+source = "git+https://github.com/wxylib/core?rev=14aa692ef75c6db422e427705bf5091e41d51396#14aa692ef75c6db422e427705bf5091e41d51396"
 dependencies = [
  "async-trait",
  "futures",
@@ -2099,7 +2099,7 @@ dependencies = [
 [[package]]
 name = "wxy-tiff"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=242562f0467c234dc510b4e52fa29f2ce81374f8#242562f0467c234dc510b4e52fa29f2ce81374f8"
+source = "git+https://github.com/wxylib/core?rev=14aa692ef75c6db422e427705bf5091e41d51396#14aa692ef75c6db422e427705bf5091e41d51396"
 dependencies = [
  "async-tiff",
  "async-trait",
@@ -2112,7 +2112,7 @@ dependencies = [
 [[package]]
 name = "wxy-warp"
 version = "0.0.1"
-source = "git+https://github.com/wxylib/core?rev=242562f0467c234dc510b4e52fa29f2ce81374f8#242562f0467c234dc510b4e52fa29f2ce81374f8"
+source = "git+https://github.com/wxylib/core?rev=14aa692ef75c6db422e427705bf5091e41d51396#14aa692ef75c6db422e427705bf5091e41d51396"
 dependencies = [
  "controlledburn",
  "proj4rs",

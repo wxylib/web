@@ -51,6 +51,8 @@ const EXAMPLES = [
   ]],
   ["Published data (live)", [
     ["GHRSST MUR, 2002 to now: one mdim VRT of COGs (16.6 MB)", GHRSST + "ghrsst-mur-v2.vrt"],
+    ["REMA 2 m mosaic of Antarctica: 5,800 COG tiles and five overviews", "https://raw.githubusercontent.com/mdsumner/rema-ovr/main/REMA-2m_dem_ovr.vrt"],
+    ["Copernicus DEM 30 m, global (OpenTopography; needs CORS on their side)", "https://opentopography.s3.sdsc.edu/raster/COP30/COP30_hh.vrt"],
     ["vrt:// over one GHRSST COG: Tasmania at a tenth", "vrt:///vsicurl/" + GHRSST_COG + "?srcwin=32300,12900,1200,1100&outsize=10%,10%"],
   ]],
 ];
@@ -70,6 +72,13 @@ function status(msg, error = false) {
 // A fetchable URL for a source name, or null (a handler the browser has
 // no route to, or a driver prefix).
 function urlOf(name, base) {
+  const u = urlOf0(name, base);
+  // github.com/o/r/raw/... redirects without CORS headers; its raw host has them
+  const m = u && u.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/raw\/(.*)$/);
+  return m ? `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${m[3]}` : u;
+}
+
+function urlOf0(name, base) {
   const s = String(name).trim();
   if (/^https?:\/\//.test(s)) return s;
   if (s.startsWith("/vsi")) return vsiToUrl(s, base, false);
@@ -460,6 +469,15 @@ function renderClassic() {
       const pf = f ? `<code>${esc(f)}</code>${args ? " " + Array.from(args.attributes).map((a) => `<code>${esc(a.name)}=${esc(a.value)}</code>`).join(" ") : ""}<br><span class="hint">${esc(PIXEL_FUNCTIONS[f]?.[3] ?? (txt(el, "PixelFunctionLanguage") ? "Python code in the document" : "not a built-in"))}</span>` : (b.sub_class ? esc(b.sub_class) : "its sources, in order");
       return `<tr><td>${b.band ?? i + 1}</td><td>${esc(b.data_type)}</td><td>${esc(b.nodata ?? "")}</td><td>${esc(el ? txt(el, "ColorInterp") ?? "" : "")}</td><td>${b.sources.length}</td><td>${pf}</td></tr>`;
     }).join("") + "</table>";
+  const ovr = bandEls.flatMap((el, i) => kids(el, "Overview").map((o) => [i + 1, txt(o, "SourceFilename"), txt(o, "SourceBand"), kid(o, "SourceFilename")?.getAttribute("relativeToVRT") === "1"]));
+  if (ovr.length) {
+    $("bands").innerHTML += `<h3>Overviews named in the document</h3><p class="hint">A reader asked for a reduced read takes the overview nearest the reduction instead of the sources (an overview here is its own dataset, often another VRT).</p>` +
+      `<table><tr><th>band</th><th>overview</th><th>band in it</th></tr>` + ovr.map(([b, f, sb, rel]) => {
+        const d = JSON.parse(vrtDsn(f ?? ""));
+        const u = d.virtual ? urlOf(rel ? new URL(f, state.base || location.href).href : f, state.base) : null;
+        return `<tr><td>${b}</td><td class="name">${dsnChips(d)}${u ? ` <a href="?src=${encodeURIComponent(u)}">explore</a>` : ""}</td><td>${esc(sb ?? "")}</td></tr>`;
+      }).join("") + "</table>";
+  }
   const sel = $("bandsel");
   sel.innerHTML = ds.bands.map((b, i) => `<option value="${i + 1}">band ${i + 1}</option>`).join("");
   sel.value = "1";
@@ -482,7 +500,7 @@ function renderSources() {
   const srcs = sourceRows(band);
   const files = [...new Set(srcs.map((s) => s.filename.text))];
   const colour = (s) => PALETTE[files.indexOf(s.filename.text) % PALETTE.length];
-  const shown = srcs.slice(0, 500);
+  const shown = srcs.slice(0, 2000);
   $("sources").innerHTML = `<table><tr><th>#</th><th>kind</th><th>name</th><th>band</th><th>SrcRect</th><th>DstRect</th><th>operations</th><th>header</th></tr>` +
     shown.map((s, i) => {
       const ops = [];
@@ -496,14 +514,29 @@ function renderSources() {
       const nested = state.nested.get(name);
       const hdr = h ? `${h.width} x ${h.height} ${h.dataType}, ${h.layout} ${h.block.join("x")}` : nested ? `VRT ${nested.ds ? nested.ds.x_size + " x " + nested.ds.y_size : ""}` : "";
       const explore = s.filename.virtual && urlOf(name, state.base) ? ` <a href="?src=${encodeURIComponent(urlOf(name, state.base))}">explore</a>` : "";
-      return `<tr data-i="${i}" class="pick"><td><span class="sw" style="background:${colour(s)}"></span>${i + 1}</td><td>${esc(s.kind)}</td>` +
+      return `<tr data-i="${i}" class="pick${i >= 50 ? " fold" : ""}"><td><span class="sw" style="background:${colour(s)}"></span>${i + 1}</td><td>${esc(s.kind)}</td>` +
         `<td class="name">${dsnChips(s.filename)}${s.relative ? ' <span class="hint">relative to the VRT</span>' : ""}${explore}</td>` +
         `<td>${esc(s.source_band)}</td><td>${s.src_rect ? s.src_rect.map(fmt).join(", ") : "whole"}</td><td>${s.dst_rect ? s.dst_rect.map(fmt).join(", ") : "whole"}</td>` +
         `<td>${ops.join("<br>")}</td><td>${esc(hdr)}</td></tr>`;
-    }).join("") + "</table>" + (srcs.length > shown.length ? `<p class="hint">First ${shown.length} of ${srcs.length} sources.</p>` : "");
-  for (const tr of $("sources").querySelectorAll("tr.pick")) tr.onclick = () => drawSourceSpace(band, Number(tr.dataset.i));
+    }).join("") + "</table>" + foldNote(shown.length, srcs.length, "source");
+  wireFold($("sources"));
+  for (const tr of $("sources").querySelectorAll("tr.pick")) tr.onclick = () => pickSource(band, Number(tr.dataset.i));
+  $("picked").innerHTML = "";
+  state.picked = null;
   drawLayout(band, colour);
   drawSourceSpace(band, 0);
+}
+
+// Long tables show 50 rows and a button for the rest (up to 2000).
+function foldNote(shown, total, what) {
+  if (total <= 50) return "";
+  return `<p class="hint">50 of ${plural(total, what)} shown. <button class="unfold">Show ${(shown - 50).toLocaleString("en")} more</button>` +
+    (total > shown ? ` The table stops at ${shown.toLocaleString("en")}; click the layout to pick any ${what}.` : "") + `</p>`;
+}
+
+function wireFold(box) {
+  const b = box.querySelector("button.unfold");
+  if (b) b.onclick = () => { for (const r of box.querySelectorAll("tr.fold")) r.classList.remove("fold"); b.parentElement.remove(); };
 }
 
 // Every nested VRT a source names, fetched (up to 40), for planning and the
@@ -543,21 +576,81 @@ function drawLayout(band, colour) {
   const W = 520, pad = 24;
   const k = (W - 2 * pad) / Math.max(ds.x_size, ds.y_size);
   const w = ds.x_size * k, h = ds.y_size * k;
-  const svg = [`<svg viewBox="0 0 ${w + 2 * pad} ${h + 2 * pad + 18}" class="fig" role="img" aria-label="Layout of sources in the VRT grid">`];
+  const svg = [`<svg viewBox="0 0 ${w + 2 * pad} ${h + 2 * pad + 18}" class="fig pickable" role="img" aria-label="Layout of sources in the VRT grid">`];
   svg.push(`<rect x="${pad}" y="${pad}" width="${w}" height="${h}" class="frame"/>`);
-  srcs.slice(0, 3000).forEach((s, i) => {
-    const r = s.dst_rect ?? [0, 0, ds.x_size, ds.y_size];
-    svg.push(`<rect x="${pad + r[0] * k}" y="${pad + r[1] * k}" width="${Math.max(0.5, r[2] * k)}" height="${Math.max(0.5, r[3] * k)}" fill="${colour(s)}" fill-opacity="0.35" stroke="${colour(s)}" ${s.filename.virtual ? 'stroke-dasharray="4 3"' : ""}><title>source ${i + 1}: ${esc(s.filename.text)}\nDstRect ${r.map(fmt).join(", ")}</title></rect>`);
-    if (srcs.length <= 40) svg.push(`<text x="${pad + (r[0] + r[2] / 2) * k}" y="${pad + (r[1] + r[3] / 2) * k + 4}" class="lbl">${i + 1}</text>`);
-  });
+  const rectOf = (s) => s.dst_rect ?? [0, 0, ds.x_size, ds.y_size];
+  if (srcs.length <= 1500) {
+    srcs.forEach((s, i) => {
+      const r = rectOf(s);
+      svg.push(`<rect x="${pad + r[0] * k}" y="${pad + r[1] * k}" width="${Math.max(0.5, r[2] * k)}" height="${Math.max(0.5, r[3] * k)}" fill="${colour(s)}" fill-opacity="0.35" stroke="${colour(s)}" ${s.filename.virtual ? 'stroke-dasharray="4 3"' : ""}><title>source ${i + 1}: ${esc(s.filename.text)}\nDstRect ${r.map(fmt).join(", ")}</title></rect>`);
+      if (srcs.length <= 40) svg.push(`<text x="${pad + (r[0] + r[2] / 2) * k}" y="${pad + (r[1] + r[3] / 2) * k + 4}" class="lbl">${i + 1}</text>`);
+    });
+  } else {
+    // many sources: one path per colour, every source drawn
+    const paths = new Map();
+    for (const s of srcs) {
+      const r = rectOf(s);
+      const c = colour(s);
+      const d = paths.get(c) ?? [];
+      const x = (pad + r[0] * k).toFixed(2), y = (pad + r[1] * k).toFixed(2);
+      const rw = Math.max(0.4, r[2] * k).toFixed(2), rh = Math.max(0.4, r[3] * k).toFixed(2);
+      d.push(`M${x} ${y}h${rw}v${rh}h-${rw}z`);
+      paths.set(c, d);
+    }
+    for (const [c, d] of paths) svg.push(`<path d="${d.join("")}" fill="${c}" fill-opacity="0.35" stroke="${c}" stroke-width="0.3"/>`);
+  }
   const plan = state.plan;
   if (plan && plan.band === band) {
     const [rx, ry, rw, rh] = plan.req;
     svg.push(`<rect x="${pad + rx * k}" y="${pad + ry * k}" width="${rw * k}" height="${rh * k}" class="req"><title>the request window</title></rect>`);
   }
+  if (state.picked?.band === band) {
+    const r = rectOf(srcs[state.picked.i]);
+    svg.push(`<rect x="${pad + r[0] * k}" y="${pad + r[1] * k}" width="${Math.max(2, r[2] * k)}" height="${Math.max(2, r[3] * k)}" class="pick"/>`);
+  }
   svg.push(`<text x="${pad}" y="${pad - 8}" class="ax">0, 0</text><text x="${pad + w}" y="${pad + h + 14}" class="ax" text-anchor="end">${ds.x_size}, ${ds.y_size}</text>`);
-  svg.push(`<text x="${pad}" y="${pad + h + 30}" class="ax">VRT pixels; dashed: a nested VRT; black outline: the request</text></svg>`);
+  svg.push(`<text x="${pad}" y="${pad + h + 30}" class="ax">${plural(srcs.length, "source")} in VRT pixels; click one to see it; black outline: the request</text></svg>`);
   $("layout").innerHTML = svg.join("");
+  // click: the source drawn last under the point is the one that wins there
+  $("layout").firstElementChild.onclick = (e) => {
+    const el = e.currentTarget;
+    const pt = el.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const q = pt.matrixTransform(el.getScreenCTM().inverse());
+    const px = (q.x - pad) / k, py = (q.y - pad) / k;
+    for (let i = srcs.length - 1; i >= 0; i--) {
+      const r = rectOf(srcs[i]);
+      if (px >= r[0] && px < r[0] + r[2] && py >= r[1] && py < r[1] + r[3]) {
+        pickSource(band, i);
+        return;
+      }
+    }
+  };
+}
+
+function pickSource(band, i) {
+  state.picked = { band, i };
+  const s = sourceRows(band)[i];
+  const files = [...new Set(sourceRows(band).map((x) => x.filename.text))];
+  drawLayout(band, (x) => PALETTE[files.indexOf(x.filename.text) % PALETTE.length]);
+  drawSourceSpace(band, i);
+  const r = s.dst_rect;
+  $("picked").innerHTML = `<b>Source ${i + 1}</b> of ${sourceRows(band).length}: <span class="name">${dsnChips(s.filename)}</span><br>` +
+    `SrcRect ${s.src_rect ? s.src_rect.map(fmt).join(", ") : "whole"}, DstRect ${r ? r.map(fmt).join(", ") : "whole"}` +
+    (s.declared_size ? `, ${s.declared_size.join(" x ")} declared` : "") +
+    ` <button id="pickhdr">Read its header</button>`;
+  $("pickhdr").onclick = async () => {
+    const name = s.relative ? new URL(s.filename.text, state.base || location.href).href : s.filename.text;
+    const url = urlOf(name, state.base);
+    if (!url) { status(`No route from a browser to ${name}.`, true); return; }
+    try {
+      status(`Reading ${url} ...`);
+      state.headers.set(name, await readTiffHeader(url));
+      status(`Read the header of source ${i + 1}.`);
+      drawSourceSpace(band, i);
+    } catch (e) { status(e.message, true); }
+  };
+  for (const tr of $("sources").querySelectorAll("tr.pick")) tr.classList.toggle("on", Number(tr.dataset.i) === i);
 }
 
 // One source's own pixel grid: its blocks (when the header is read), the
@@ -621,7 +714,9 @@ function zoomSvg(h, leaves, s, size) {
   const bx1 = Math.min(h.blocks[0], Math.ceil(x1 / bw) + 1), by1 = Math.min(h.blocks[1], Math.ceil(y1 / bh) + 1);
   const X0 = bx0 * bw, Y0 = by0 * bh, X1 = Math.min(size[0], bx1 * bw), Y1 = Math.min(size[1], by1 * bh);
   const W = 520, pad = 24, k = (W - 2 * pad) / Math.max(X1 - X0, Y1 - Y0);
-  const out = [`<svg viewBox="0 0 ${(X1 - X0) * k + 2 * pad} ${(Y1 - Y0) * k + 2 * pad + 4}" class="fig" style="margin-top:8px" role="img" aria-label="Blocks around the read">`];
+  const cid = "zc" + Math.random().toString(36).slice(2, 8);
+  const out = [`<svg viewBox="0 0 ${(X1 - X0) * k + 2 * pad} ${(Y1 - Y0) * k + 2 * pad + 4}" class="fig" style="margin-top:8px" role="img" aria-label="Blocks around the read">` +
+    `<clipPath id="${cid}"><rect x="${pad}" y="${pad}" width="${(X1 - X0) * k}" height="${(Y1 - Y0) * k}"/></clipPath><g clip-path="url(#${cid})">`];
   let n = 0;
   for (let by = by0; by < by1; by++) for (let bx = bx0; bx < bx1; bx++) {
     const on = leaves.some((l) => { const [x, y, xs, ys] = l.window.req_px; return x < (bx + 1) * bw && x + xs > bx * bw && y < (by + 1) * bh && y + ys > by * bh; });
@@ -633,7 +728,7 @@ function zoomSvg(h, leaves, s, size) {
   const r = s.src_rect;
   if (r) out.push(`<rect x="${pad + (r[0] - X0) * k}" y="${pad + (r[1] - Y0) * k}" width="${r[2] * k}" height="${r[3] * k}" class="srect"/>`);
   for (const l of leaves) { const [x, y, xs, ys] = l.window.req; out.push(`<rect x="${pad + (x - X0) * k}" y="${pad + (y - Y0) * k}" width="${xs * k}" height="${ys * k}" class="req"/>`); }
-  out.push(`</svg><p class="hint">Close up: the ${plural(n, "block")} the read needs at full resolution (column, row), with one block around.</p>`);
+  out.push(`</g></svg><p class="hint">Close up: the ${plural(n, "block")} the read needs at full resolution (column, row), with one block around.</p>`);
   return out.join("");
 }
 
@@ -723,20 +818,26 @@ function runPlan() {
   state.plan = { band, req, leaves: p.leaves, rows: p.rows };
   const opsText = (ops) => ops.map((o) => o.op === "skip_nodata" ? `skip ${o.value}` : o.op === "linear" ? `x ${fmt(o.ratio)} + ${fmt(o.offset)}` : `LUT (${o.pairs.length} pairs)`).join(", ");
   const resampled = p.rows.filter((x) => x.resampled).length;
+  const bandEl = kids(state.doc.documentElement, "VRTRasterBand")[band - 1];
+  const nOvr = bandEl ? kids(bandEl, "Overview").length : 0;
+  const red = Math.min(req[2] / req[4], req[3] / req[5]);
   $("plan").innerHTML =
+    (nOvr && red > 1.2 ? `<p class="warn">This read reduces by ${fmt(+red.toFixed(1))}, and the band names ${plural(nOvr, "overview")}: the reference library would read the overview nearest that reduction, not these sources. The plan below is what the sources alone would need.</p>` : "") +
     (p.derived ? `<p>This band is computed by a pixel function: each row is one input, read into its own buffer of ${req[4]} x ${req[5]}, and the function combines them.</p>` : "") +
     `<p>${plural(p.rows.length, "source")} of ${sourceRows(band).length} touched${resampled ? `, ${resampled} resampled on the way` : ""}; ${plural(p.leaves.length, "read")} at the bottom of any nesting.</p>` +
     `<table><tr><th>source</th><th>reads (source pixels)</th><th>asks for</th><th>lands at (buffer)</th><th>operations, inner first</th><th>first columns sampled</th></tr>` +
-    p.leaves.slice(0, 300).map((l) => `<tr><td class="name">${esc(l.dsn.replace(state.base, ""))} b${l.band}${l.mask ? " mask" : ""}</td>` +
+    p.leaves.slice(0, 2000).map((l, i) => `<tr${i >= 50 ? ' class="fold"' : ""}><td class="name">${esc(l.dsn.replace(state.base, ""))} b${l.band}${l.mask ? " mask" : ""}</td>` +
       `<td>${l.window.req.map(fmt).join(", ")}</td><td>${l.window.req_px.join(", ")}</td><td>${l.window.out.join(", ")}</td>` +
       `<td>${l.ops.slice().reverse().map(opsText).filter(Boolean).join(" then ") || "none"}</td>` +
-      `<td>${l.cols ? l.cols.slice(0, 12).join(" ") + (l.cols.length > 12 ? " ..." : "") : ""}</td></tr>`).join("") + "</table>";
+      `<td>${l.cols ? l.cols.slice(0, 12).join(" ") + (l.cols.length > 12 ? " ..." : "") : ""}</td></tr>`).join("") + "</table>" +
+    foldNote(Math.min(2000, p.leaves.length), p.leaves.length, "read");
+  wireFold($("plan"));
   drawBuffer(p, req);
   const bandSel = Number($("bandsel").value || 1);
   if (bandSel === band) {
     const files = [...new Set(sourceRows(band).map((s) => s.filename.text))];
     drawLayout(band, (s) => PALETTE[files.indexOf(s.filename.text) % PALETTE.length]);
-    drawSourceSpace(band, 0);
+    drawSourceSpace(band, state.picked?.band === band ? state.picked.i : 0);
   }
 }
 
