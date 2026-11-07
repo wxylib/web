@@ -239,6 +239,28 @@ only the first axis is stepped, so a VRT with time and depth shows the
 first depth. The parse holds the whole XML in memory; a VRT many times
 larger would want a streaming parse or the store's flat refs table.
 
+## An mdim-refs table, read in the browser
+
+`www/bran.html` draws BRAN2023 `temp` from its byte table: every chunk is
+a range request into the netCDF files on NCI's THREDDS server, inflated
+and unshuffled in the page. With `?table=` it opens any mdim-refs/0.2
+export (`arrays.json` plus `refs_<array>.parquet`, the form
+`wxy_virtual::from_refs_table` reads), so the same page shows the
+wxylib/fixtures tables straight from GitHub:
+
+- [BRAN2023 temp, January 2010](https://wxylib.github.io/web/bran.html?table=https://raw.githubusercontent.com/wxylib/fixtures/main/mdimrefs/bran2023-temp-201001/)
+- [OISST, September 1981](https://wxylib.github.io/web/bran.html?table=https://raw.githubusercontent.com/wxylib/fixtures/main/mdimrefs/oisst-198109/&array=sst)
+
+The Parquet is read with hyparquet. `?array=` picks a referenced array
+(else the first), `?target=` a `remap` target (else the first the table
+names), and `?range=lo,hi` the colour stretch (default `-2,31`). Absent
+chunks are drawn as fill; inline chunks (`data`) are decoded from the
+table. Chunks must be one time and one level of a 4D int16 array, with
+zlib and an optional shuffle. If a data host refuses the browser (no
+CORS), the page says so and keeps drawing what it can. Checked against
+GDAL on the three-day test table; THREDDS and NOAA's bucket were not
+reachable from where this was written.
+
 ## What is in a VRT?
 
 `www/vrt.html` explores any VRT: give it a URL, a `vrt://` string, or a

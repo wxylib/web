@@ -2,10 +2,14 @@
 // range request into a netCDF file on THREDDS, inflated (zlib) and
 // unshuffled (2-byte HDF5 shuffle) here. The table is a cut of the store's
 // flat mdim-refs export (scripts/bran_extract.py); ?refs= names another.
+// ?table= opens an mdim-refs table export itself (arrays.json plus
+// refs_<array>.parquet, see mdimrefs.js), with ?array= and ?target= to pick
+// the array and the remap target, and ?range=lo,hi for the colour stretch.
 
 const params = new URLSearchParams(location.search);
 const REFS = params.get("refs") || "data/bran2023-temp-2010.json";
-const VMIN = -2, VMAX = 31;
+const TABLE = params.get("table");
+const [VMIN, VMAX] = (params.get("range") || "-2,31").split(",").map(Number);
 const $ = (id) => document.getElementById(id);
 
 let T;                      // the refs extract
@@ -35,10 +39,19 @@ async function chunk(li, t, cy, cx) {
   const L = T.levels[li], [, ny, nx] = T.chunk_grid;
   const i = (t * ny + cy) * nx + cx;
   const off = L.offset[i], size = L.size[i];
+  // a table opened with ?table= names a file per chunk, may hold chunks
+  // inline, and leaves absent chunks out (they read as the fill value)
+  const fi = T.fileByChunk ? L.file[i] : L.file[t];
+  if (L.inline && L.inline.has(i)) return decodeChunk(key, L.inline.get(i));
+  if (fi < 0) {
+    const v = new Int16Array(T.chunks[2] * T.chunks[3]).fill(T.fill ?? 0);
+    cache.set(key, v);
+    return v;
+  }
   let r, tries = 0;
   for (;;) {
     try {
-      r = await fetch(T.files[L.file[t]], { headers: { Range: `bytes=${off}-${off + size - 1}` } });
+      r = await fetch(T.files[fi], { headers: { Range: `bytes=${off}-${off + size - 1}` } });
       if (r.status !== 206) throw new Error(`HTTP ${r.status}`);
       break;
     } catch (e) {
@@ -48,9 +61,27 @@ async function chunk(li, t, cy, cx) {
   }
   const buf = await r.arrayBuffer();
   stats.req++; stats.bytes += buf.byteLength;
-  const v = unshuffle(await inflate(buf));
+  return decodeChunk(key, buf);
+}
+
+// zlib, then the 2-byte shuffle when the codec lists it (the extract
+// format always has both).
+async function decodeChunk(key, buf) {
+  const filters = (T.codec && T.codec.filters) || [{ id: "shuffle" }];
+  const raw = await inflate(buf);
+  const v = filters.some((f) => f.id === "shuffle") ? unshuffle(raw) : new Int16Array(raw.buffer);
   cache.set(key, v);
   return v;
+}
+
+// A chunk that cannot be fetched (the data host refuses cross-origin reads,
+// or the network) is skipped and reported; the rest of the frame still draws.
+let failures = 0;
+function failed(e) {
+  failures++;
+  $("warn").hidden = false;
+  $("warn").textContent = `${failures} chunk${failures > 1 ? "s" : ""} could not be fetched from the data host ` +
+    `(${e.message}). The host may not allow reads from this page (CORS), or be unreachable.`;
 }
 
 function showStats() {
@@ -58,6 +89,8 @@ function showStats() {
   $("s-mb").textContent = (stats.bytes / 1e6).toFixed(1);
 }
 
+// "C" for Celsius however the table spells it, else the units as given.
+const unit = () => (/^(deg(ree)?s?[ _]?c|celsius)$/i.test(T.units || "C") ? "C" : T.units);
 const degc = (raw) => (raw === T.fill ? NaN : raw * T.scale_factor + T.add_offset);
 
 // Draw one chunk into the canvas: north up, so chunk rows flip.
@@ -98,7 +131,8 @@ async function frame() {
   async function worker() {
     while (next < jobs.length && my === token) {
       const [cy, cx] = jobs[next++];
-      const v = await chunk(li, t, cy, cx);
+      let v;
+      try { v = await chunk(li, t, cy, cx); } catch (e) { failed(e); continue; }
       if (my !== token) return;
       paint(ctx, v, cy, cx);
       showStats();
@@ -144,7 +178,7 @@ async function series(p) {
     const fg = getComputedStyle(document.body).color;
     svg.innerHTML =
       `<line x1="40" y1="200" x2="990" y2="200" stroke="${fg}" stroke-opacity=".25"/>` +
-      `<text x="4" y="24" font-size="12" fill="${fg}">${hi} C</text><text x="4" y="200" font-size="12" fill="${fg}">${lo} C</text>` +
+      `<text x="4" y="24" font-size="12" fill="${fg}">${hi} ${unit()}</text><text x="4" y="200" font-size="12" fill="${fg}">${lo} ${unit()}</text>` +
       `<text x="44" y="216" font-size="12" fill="${fg}" opacity=".7">${dateOf(0)}</text>` +
       `<text x="990" y="216" font-size="12" fill="${fg}" opacity=".7" text-anchor="end">${dateOf(n - 1)}</text>` +
       `<text x="520" y="16" font-size="12" fill="${fg}" text-anchor="middle">${p.lon.toFixed(2)}E ${p.lat.toFixed(2)}N, ${T.levels[li].depth} m: ` +
@@ -155,7 +189,8 @@ async function series(p) {
   async function worker() {
     while (next < n && my === stoken) {
       const t = next++;
-      const v = await chunk(li, t, cy, cx);
+      let v;
+      try { v = await chunk(li, t, cy, cx); } catch (e) { failed(e); continue; }
       vals[t] = degc(v[(p.row % h) * w + (p.col % w)]);
       showStats();
       if (t % 10 === 0) draw();
@@ -177,11 +212,20 @@ async function play() {
 }
 
 async function main() {
-  $("src").textContent = new URL(REFS, location.href).href;
-  T = await (await fetch(REFS)).json();
+  if (TABLE) {
+    const { fromMdimRefs } = await import("./mdimrefs.js");
+    $("src").textContent = new URL(TABLE, location.href).href;
+    T = await fromMdimRefs(new URL(TABLE, location.href).href, params.get("array"), params.get("target"));
+    T.fileByChunk = true;
+    $("map").width = T.shape[3]; $("map").height = T.shape[2];
+    document.querySelector("h1").textContent = `${T.array}, read through its byte table`;
+  } else {
+    $("src").textContent = new URL(REFS, location.href).href;
+    T = await (await fetch(REFS)).json();
+  }
   $("about").textContent = `${T.about}. Table cut from ${T.store}; ${T.files.length} source files, ` +
     `${T.levels.reduce((s, L) => s + L.offset.length, 0).toLocaleString()} chunk references.`;
-  T.levels.forEach((L, i) => $("level").add(new Option(`${L.depth} m`, i)));
+  T.levels.forEach((L, i) => $("level").add(new Option(`${+(+L.depth).toFixed(1)} m`, i)));
   $("day").max = T.shape[0] - 1;
   for (const id of ["day", "level", "grid"]) $(id).addEventListener("change", frame);
   $("day").addEventListener("input", () => { $("date").textContent = dateOf(+$("day").value); });
@@ -192,7 +236,7 @@ async function main() {
     if (!p) { tip.style.display = "none"; return; }
     const v = valueAt(+$("level").value, +$("day").value, p);
     tip.textContent = `${p.lon.toFixed(2)}E ${p.lat.toFixed(2)}N  ` +
-      (v === undefined ? "not loaded" : isNaN(v) ? "land" : `${v.toFixed(2)} C`);
+      (v === undefined ? "not loaded" : isNaN(v) ? "land" : `${v.toFixed(2)} ${unit()}`);
     const b = $("map").parentElement.getBoundingClientRect();
     tip.style.left = `${ev.clientX - b.left + 12}px`; tip.style.top = `${ev.clientY - b.top + 12}px`;
     tip.style.display = "block";
