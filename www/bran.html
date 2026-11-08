@@ -31,6 +31,7 @@
   .stat span { color: var(--muted); font-size: 12px; }
   #series { width: 100%; height: 220px; display: block; background: var(--panel); border: 1px solid var(--line); }
   .hint { color: var(--muted); font-size: 12px; }
+  .warn { border: 1px solid var(--accent); border-radius: 6px; padding: 6px 10px; margin: 8px 0; }
   code { font-size: 12px; }
   a { color: inherit; }
 </style>
@@ -49,6 +50,7 @@
     <button id="play">Play</button>
     <label><input type="checkbox" id="grid" checked> chunk grid</label>
   </div>
+  <p class="warn" id="warn" hidden></p>
   <div class="stage">
     <canvas id="map" width="3600" height="1500"></canvas>
     <div id="tip"></div>
@@ -63,7 +65,11 @@
   <svg id="series" viewBox="0 0 1000 220" preserveAspectRatio="none" role="img" aria-label="time series"></svg>
   <p class="hint" id="about"></p>
   <p class="hint">The table: <code id="src"></code>. Another table in the same form can be given as
-    <code>?refs=&lt;url&gt;</code>. How this works, and the same reads from Python, R and the <code>wxy</code>
+    <code>?refs=&lt;url&gt;</code>, and an mdim-refs table export (<code>arrays.json</code> with
+    <code>refs_&lt;array&gt;.parquet</code>) as <code>?table=&lt;url&gt;</code>: the
+    <a href="?table=https://raw.githubusercontent.com/wxylib/fixtures/main/mdimrefs/bran2023-temp-201001/">BRAN2023 fixture</a>
+    (32 days, 51 depths), <a href="?table=https://raw.githubusercontent.com/wxylib/fixtures/main/mdimrefs/oisst-198109/&amp;array=sst">OISST, September 1981</a>
+    and the <a href="?table=https://raw.githubusercontent.com/wxylib/fixtures/main/mdimrefs/&amp;array=sst">three-day test table</a>. How this works, and the same reads from Python, R and the <code>wxy</code>
     command: <a href="https://wxylib.org/docs/">wxylib.org/docs</a>.</p>
 </main>
 <script>const INFERNO = [0,0,3,1,1,9,3,2,18,6,4,27,10,7,35,15,9,45,20,11,54,26,11,64,32,12,74,39,11,82,46,10,90,53,9,96,60,9,101,67,10,104,74,11,106,80,13,108,87,15,109,93,18,110,99,20,110,106,23,110,112,25,110,118,27,109,125,29,108,131,32,107,137,34,105,144,36,104,150,38,102,156,41,99,163,43,97,169,46,94,175,49,91,181,51,87,187,55,84,193,58,80,199,62,76,204,65,72,209,70,67,214,74,63,219,79,58,223,84,54,228,90,49,231,95,44,235,101,39,238,108,34,241,114,29,243,121,24,246,128,18,248,135,13,249,142,8,250,149,6,251,157,6,251,164,10,251,172,16,251,179,24,250,187,33,249,195,42,248,203,52,246,211,63,244,219,75,243,226,89,241,233,104,241,240,121,243,246,137,247,251,153];</script>
