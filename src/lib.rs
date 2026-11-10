@@ -19,6 +19,7 @@
 //! tested natively against the wxylib/fixtures COGs.
 
 pub mod explore;
+pub mod ranges;
 pub mod render;
 
 #[cfg(target_arch = "wasm32")]

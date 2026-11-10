@@ -1,8 +1,10 @@
 //! An async-tiff reader over the browser's `fetch`, with range requests.
 //!
 //! Each range read is cached, so panning and zooming re-reads tiles from
-//! memory rather than the network. `fetch` is called on the global
-//! object, so this works on a page and in a worker.
+//! memory rather than the network. A batch of tile reads is merged into
+//! as few requests as the policy in [`crate::ranges`] allows, with up to
+//! six in flight at once. `fetch` is called on the global object, so this
+//! works on a page and in a worker.
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -11,9 +13,12 @@ use std::sync::Mutex;
 use async_tiff::error::{AsyncTiffError, AsyncTiffResult};
 use async_tiff::reader::AsyncFileReader;
 use bytes::Bytes;
+use futures_util::stream::{self, StreamExt};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
+
+use crate::ranges;
 
 #[wasm_bindgen]
 extern "C" {
@@ -90,5 +95,55 @@ impl AsyncFileReader for FetchReader {
         }
         self.cache.lock().unwrap().insert(key, b.clone());
         Ok(b)
+    }
+
+    async fn get_byte_ranges(&self, wanted: Vec<Range<u64>>) -> AsyncTiffResult<Vec<Bytes>> {
+        let mut out: Vec<Option<Bytes>> = {
+            let cache = self.cache.lock().unwrap();
+            wanted
+                .iter()
+                .map(|r| cache.get(&(r.start, r.end)).cloned())
+                .collect()
+        };
+        let missing: Vec<usize> = (0..wanted.len()).filter(|&i| out[i].is_none()).collect();
+        let reads: Vec<Range<u64>> = missing.iter().map(|&i| wanted[i].clone()).collect();
+        let merged = ranges::merge(
+            &reads,
+            ranges::MAX_REQUEST_BYTES,
+            ranges::MAX_OVERFETCH_BYTES,
+        );
+        // in order, at most MAX_CONCURRENT requests at once
+        let fetched: Vec<Result<Bytes, String>> = stream::iter(merged.iter())
+            .map(|m| self.fetch(m.range.clone()))
+            .buffered(ranges::MAX_CONCURRENT)
+            .collect()
+            .await;
+        for (m, body) in merged.iter().zip(fetched) {
+            let body = body.map_err(AsyncTiffError::General)?;
+            {
+                let mut s = self.stats.lock().unwrap();
+                s.0 += 1;
+                s.1 += body.len() as u64;
+            }
+            let mut cache = self.cache.lock().unwrap();
+            for &j in &m.members {
+                let r = &reads[j];
+                let lo = (r.start - m.range.start) as usize;
+                let hi = (r.end - m.range.start) as usize;
+                if hi > body.len() {
+                    return Err(AsyncTiffError::General(format!(
+                        "short read of {} bytes for {}..{} ({})",
+                        body.len(),
+                        m.range.start,
+                        m.range.end,
+                        self.url
+                    )));
+                }
+                let b = body.slice(lo..hi);
+                cache.insert((r.start, r.end), b.clone());
+                out[missing[j]] = Some(b);
+            }
+        }
+        Ok(out.into_iter().map(|b| b.unwrap()).collect())
     }
 }
