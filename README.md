@@ -18,6 +18,15 @@ fetches only the tiles the view touches:
 
 ![The same scene zoomed in to full resolution](docs/img/hobart-3031-zoom.png)
 
+The tiles a warp needs are fetched as one batch: adjacent tiles are merged
+into one range request (gaps up to the median tile length, at most 1 MiB
+per request) and up to six requests run at once, the browser's limit per
+host over HTTP/1.1 (`src/ranges.rs`, the policy of deck.gl-raster's range
+reader). On a GHRSST MUR COG (512-pixel tiles, ZSTD), a 60 x 30 degree
+full-resolution view needs 91 tiles (8.5 MB): 92 sequential requests and
+30.4 s before merging, 13 requests and 7.0 s after, with identical values
+and 632 bytes fetched across gaps (Chromium, from a cloud container).
+
 ## Sentinel-2 on a web map
 
 The landing page (`www/index.html`, the Pages root) lists the examples.

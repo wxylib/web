@@ -26,6 +26,7 @@ rwarp = { version = "0.3", default-features = false, features = ["proj4rs"] }
 async-tiff = { version = "0.4.0", default-features = false }
 async-trait = "0.1.89"
 bytes = "1.12.0"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
