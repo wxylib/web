@@ -27,6 +27,10 @@ jobs:
           WXY_FIXTURES: ${{ github.workspace }}/fixtures
       - name: Editing canvas engine tests
         run: node scripts/edit-core-test.mjs
+      - name: Zarr metadata reader tests
+        run: node scripts/zarrmeta-test.mjs
+        env:
+          WXY_FIXTURES: ${{ github.workspace }}/fixtures
       - name: wasm-bindgen-cli at the locked version
         run: |
           v=$(grep -A1 'name = "wasm-bindgen"$' Cargo.lock | grep version | cut -d'"' -f2)

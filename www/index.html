@@ -90,6 +90,15 @@
           tiles a read touches. The planner is vrt-model in wasm, byte-identical to GDAL on the VRT corpus.</p>
       </div>
     </a>
+    <a class="card" href="zarr.html">
+      <img src="img/zarr.jpg" alt="Sea surface temperature round Antarctica, drawn from 19 chunks at two overview levels, with the chunk outlines and the level of each screen tile">
+      <div>
+        <h2>Which chunks does a view need?</h2>
+        <p>A view in any projection planned before anything is fetched: the screen in tiles, each with the
+          resolution level its own scale needs, the chunks counted beside the usual one-box rule. Zarr multiscales
+          from metadata alone; a COG is then fetched and drawn by its plan. Turn the globe and watch the plan move.</p>
+      </div>
+    </a>
     <a class="card" href="edit.html">
       <img src="img/edit.jpg" alt="Drawing a line perpendicular to a road from a parcel corner, with snapping and an angle lock">
       <div>
