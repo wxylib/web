@@ -74,6 +74,17 @@ fn fill(ds: &TiffDataset) -> f64 {
 
 /// Warp the dataset to the view, reading the overview gdalwarp would.
 pub async fn warp(ds: &TiffDataset, view: &View) -> Result<Rendered, String> {
+    warp_level(ds, view, None).await
+}
+
+/// Warp the dataset to the view from a given level (0 is full resolution,
+/// `k` the k-th overview), or with `None` from the one gdalwarp would
+/// choose. A view plan gives each screen tile its level.
+pub async fn warp_level(
+    ds: &TiffDataset,
+    view: &View,
+    level: Option<usize>,
+) -> Result<Rendered, String> {
     let e = |e: wxy_source::Error| e.to_string();
     let domains = &ds.collection.domains;
     let opts = WarpOptions {
@@ -84,9 +95,13 @@ pub async fn warp(ds: &TiffDataset, view: &View) -> Result<Rendered, String> {
         .iter()
         .map(|d| *d.shape().last().unwrap_or(&0))
         .collect();
-    let level = wxy_warp::choose_overview(&domains[0], &widths, &view.grid, &opts)
-        .map_err(e)?
-        .map_or(0, |k| k + 1);
+    let level = match level {
+        Some(k) if k < ds.levels.len() => k,
+        Some(k) => return Err(format!("no level {k}: the source has {}", ds.levels.len())),
+        None => wxy_warp::choose_overview(&domains[0], &widths, &view.grid, &opts)
+            .map_err(e)?
+            .map_or(0, |k| k + 1),
+    };
     let nodata = fill(ds);
     let buf = wxy_warp::warp(
         &ds.levels[level],

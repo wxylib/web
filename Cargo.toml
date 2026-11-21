@@ -21,6 +21,7 @@ wxy-warp = { git = "https://github.com/wxylib/core", rev = "15bab9ed7ff6549d3623
 vrt-model = { git = "https://github.com/wxylib/core", rev = "15bab9ed7ff6549d36239d08ea51b58c35374236" }
 serde_json = "1"
 # the same rwarp wxy-warp pins, for CRS transforms of the source outline
+# and the view plan
 rwarp = { version = "0.5", default-features = false, features = ["proj4rs"] }
 # same version wxy-tiff uses, for the AsyncFileReader trait
 async-tiff = { version = "0.4.0", default-features = false }
@@ -31,6 +32,12 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Request", "RequestInit", "Response", "Headers"] }
+
+# rwarp::view (the view-to-chunk planner) is on rwarp's main, after 0.5.0.
+# Drop this once a release has it. wxy-warp follows the same patch, so
+# there is one rwarp in the build.
+[patch.crates-io]
+rwarp = { git = "https://github.com/hypertidy/rwarp", rev = "e36a667f13f07337fbd537a7029416d7d0fd0b2e" }
 
 [profile.release]
 opt-level = 3

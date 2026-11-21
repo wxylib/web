@@ -27,6 +27,45 @@ full-resolution view needs 91 tiles (8.5 MB): 92 sequential requests and
 30.4 s before merging, 13 requests and 7.0 s after, with identical values
 and 632 bytes fetched across gaps (Chromium, from a cloud container).
 
+## Which chunks does a view need?
+
+`www/zarr.html` plans a view before anything is fetched. The planner is
+`rwarp::view` in the wasm module: the screen is cut into 64 pixel tiles,
+each takes the resolution level its own scale needs and the chunks under
+its own footprint, and the result is a list of `(level, column, row)`
+keys, nearest the centre first. The page draws the plan over the map
+(screen tiles tinted by level, the outlines of the planned chunks) and
+counts it beside the usual rule, one box at one level for the whole view.
+
+![Sea surface temperature round Antarctica in south polar stereographic,
+drawn from 19 tiles of two overview levels of a GHRSST MUR COG](docs/img/zarr-ghrsst-3031.jpg)
+
+One day of GHRSST MUR (a 36000 x 17999 COG in longitude and latitude, on
+source.coop) in EPSG:3031: 19 tiles of overviews 3 and 4, 3.7 MB in 7
+range requests. One box at one level asks for 54 tiles of overview 2,
+7.6 MB, for the same picture. Across the antimeridian the gap is wider:
+a 40 degree view of a pyramid of that shape needs 6 chunks by the plan
+and 144 by one box, which spans the whole width of the grid.
+
+- A Zarr source is read for its metadata only (`www/zarrmeta.js`): a
+  Zarr v3 array with the GeoZarr `spatial:` and `proj:` attributes, or a
+  group with `multiscales`. Two stores of nothing but `zarr.json` files
+  (`www/data/zarr`, written by `scripts/zarr_pyramid_metadata.py`) have
+  the shape of GHRSST MUR with and without overviews. Zarr chunks are
+  not fetched or drawn yet.
+- A COG source is fetched and drawn by its plan: `cog.prefetch(chunks)`
+  reads the plan's tiles in merged range requests, then each screen tile
+  is warped by `wxy-warp` from the level its plan gave it
+  (`cog.warpLevel`). The size column is the stored bytes of the planned
+  tiles, from the tile byte counts.
+- Views: an orthographic globe (drag turns it), both polar stereographic
+  grids, longitude and latitude across 180 degrees and whole, and Web
+  Mercator. A budget moves the outermost screen tiles to coarser levels
+  until the plan fits.
+
+The planner is in rwarp after 0.5.0, so `Cargo.toml` patches rwarp to
+its commit until a release has it.
+
 ## Sentinel-2 on a web map
 
 The landing page (`www/index.html`, the Pages root) lists the examples.

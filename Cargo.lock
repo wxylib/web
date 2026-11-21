@@ -1319,9 +1319,8 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "rwarp"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afbf7939f02bc52feb3fd4b4316528bbb8c86d248ccba9355ddf98e9ba0715ba"
+version = "0.5.1"
+source = "git+https://github.com/hypertidy/rwarp?rev=e36a667f13f07337fbd537a7029416d7d0fd0b2e#e36a667f13f07337fbd537a7029416d7d0fd0b2e"
 dependencies = [
  "bigcurve",
  "controlledburn",
