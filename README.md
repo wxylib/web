@@ -53,6 +53,18 @@ the middle and coarser levels toward the limb](docs/img/zarr-pyramid-globe.jpg)
 The same day as a small Zarr pyramid, on the globe: 50 chunks of three
 levels, where one box at level 0 asks for 96.
 
+![Sea surface temperature south of Australia seen from 2,500 km up,
+looking north to the horizon: overview 1 under the viewer, overview 4
+at the horizon](docs/img/zarr-tilted.jpg)
+
+The tilted perspective view (PROJ's `tpers`, in proj4rs) looks from a
+height toward the horizon, with height, tilt and heading on the page
+(`?height=`, `?tilt=`, `?azi=`). The scale changes down the screen, so
+this is where one level for the whole view fits worst: from 2,500 km
+with a 40 degree tilt the GHRSST COG is planned as 20 tiles of
+overviews 1 to 4 (4.7 MB), fine under the viewer and coarse at the
+horizon, where one box asks for 54 tiles of overview 2 (13.7 MB).
+
 - A Zarr source is planned from its metadata (`www/zarrmeta.js`): a
   Zarr v3 array with the GeoZarr `spatial:` and `proj:` attributes, or a
   group with `multiscales`. Two stores of nothing but `zarr.json` files

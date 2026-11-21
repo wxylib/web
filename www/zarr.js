@@ -30,6 +30,8 @@ const R = 6371000;
 // half-widths are in the view CRS's units; the height follows the canvas
 const VIEWS = {
   globe: { name: "Globe (orthographic)", globe: [147, -42], half: 6.6e6 * 4 / 3 },
+  // from a point above the globe, looking off the vertical: the horizon is in the picture
+  tilt: { name: "Tilted perspective (from above, toward the horizon)", globe: [147, -42], persp: true },
   south: { name: "South polar stereographic (EPSG:3031)", crs: "EPSG:3031", centre: [0, 0], half: 4e6 * 4 / 3 },
   north: { name: "North polar stereographic (EPSG:3413)", crs: "EPSG:3413", centre: [0, 0], half: 4e6 * 4 / 3 },
   seam: { name: "Longitude / latitude across 180", crs: "EPSG:4326", centre: [180, -10], half: 20 },
@@ -74,6 +76,7 @@ async function getJson(url) {
 
 async function openSource(url, planOnly = false) {
   url = url.trim();
+  planOnly = planOnly || SOURCES.some((s) => s.plan && s.url === url);
   if (!url) { say("Paste the URL of a COG, or of a Zarr v3 array or multiscales group, served with CORS."); return false; }
   say("Opening " + url + " ...");
   try {
@@ -135,11 +138,33 @@ function orthoCrs(lon0, lat0) {
   return `+proj=ortho +lon_0=${lon0.toFixed(4)} +lat_0=${lat0.toFixed(4)} +R=${R}`;
 }
 
+// The tilted perspective (tpers) from `h` metres above (lon0, lat0), the
+// view axis `tilt` degrees off the vertical toward heading `azi`.
+function perspCrs(lon0, lat0) {
+  return `+proj=tpers +lon_0=${lon0.toFixed(4)} +lat_0=${lat0.toFixed(4)} +h=${+$("height").value}` +
+    ` +tilt=${+$("tilt").value} +azi=${+$("azi").value} +R=${R}`;
+}
+
+// The extent of the tilted view: the picture plane out to where the
+// horizon falls when the tilt is 0, shifted up the screen with the tilt
+// so the far ground and the horizon stay in the frame.
+function perspExtent() {
+  const P = 1 + +$("height").value / R, t = +$("tilt").value * Math.PI / 180;
+  const disc = R * Math.sqrt((P - 1) / (P + 1));
+  const hw = disc * 0.75, hh = hw * H / W, up = hh * 0.9 * Math.sin(t) / Math.sin(70 * Math.PI / 180);
+  return [-hw, hw, -hh + up, hh + up];
+}
+
+const globeCrs = (v) => v.persp ? perspCrs(v.lon0, v.lat0) : orthoCrs(v.lon0, v.lat0);
+
 function setView(key) {
   const v = VIEWS[key];
   const hw = v.half, hh = hw * H / W;
+  $("persp").hidden = !v.persp;
   if (v.globe) {
-    view = { key, lon0: v.globe[0], lat0: v.globe[1], crs: orthoCrs(...v.globe), extent: [-hw, hw, -hh, hh] };
+    view = { key, globe: true, persp: !!v.persp, lon0: v.globe[0], lat0: v.globe[1] };
+    view.crs = globeCrs(view);
+    view.extent = v.persp ? perspExtent() : [-hw, hw, -hh, hh];
   } else {
     view = { key, crs: v.crs, extent: [v.centre[0] - hw, v.centre[0] + hw, v.centre[1] - hh, v.centre[1] + hh] };
   }
@@ -467,6 +492,20 @@ $("go").onclick = () => load($("url").value, $("view").value);
 $("url").addEventListener("keydown", (e) => { if (e.key === "Enter") $("go").onclick(); });
 $("view").onchange = () => { if (!source) return; setView($("view").value); if (toView) changed(true); };
 for (const id of ["tile", "quality", "budget"]) $(id).onchange = () => changed(true);
+function perspText() {
+  $("tiltText").textContent = `${$("tilt").value} deg`;
+  $("aziText").textContent = `${$("azi").value} deg`;
+}
+function perspChanged(now) {
+  perspText();
+  if (!source || !view?.persp) return;
+  view.crs = globeCrs(view);
+  view.extent = perspExtent();
+  if (bindView()) changed(now);
+}
+$("height").onchange = () => perspChanged(true);
+for (const id of ["tilt", "azi"]) { $(id).oninput = () => perspChanged(false); $(id).onchange = () => perspChanged(true); }
+perspText();
 for (const id of ["showTiles", "showChunks", "showSingle"]) $(id).onchange = redraw;
 $("showData").onchange = () => { if ($("showData").checked) changed(true); else { dataFor = null; redraw(); } };
 
@@ -479,14 +518,20 @@ canvas.addEventListener("pointerdown", (e) => {
 canvas.addEventListener("pointermove", (e) => {
   if (!drag || !view) return;
   const k = (view.extent[1] - view.extent[0]) / canvas.getBoundingClientRect().width;
-  const dx = (e.clientX - drag.x) * k, dy = (e.clientY - drag.y) * k;
+  let dx = (e.clientX - drag.x) * k, dy = (e.clientY - drag.y) * k;
   drag = { x: e.clientX, y: e.clientY };
-  if (view.key === "globe") {
-    // turn the globe: metres on the screen to degrees at its centre
+  if (view.globe) {
+    // turn the globe: metres on the screen to degrees at its centre,
+    // along the heading when the view has one
     const deg = 180 / (Math.PI * R);
+    if (view.persp) {
+      const a = +$("azi").value * Math.PI / 180, x = dx, y = dy;
+      dx = x * Math.cos(a) + y * Math.sin(a);
+      dy = -x * Math.sin(a) + y * Math.cos(a);
+    }
     view.lon0 = ((view.lon0 - dx * deg / Math.max(0.2, Math.cos(view.lat0 * Math.PI / 180)) + 540) % 360) - 180;
     view.lat0 = Math.max(-90, Math.min(90, view.lat0 - dy * deg));
-    view.crs = orthoCrs(view.lon0, view.lat0);
+    view.crs = globeCrs(view);
     if (!bindView()) return;
   } else {
     view.extent = [view.extent[0] - dx, view.extent[1] - dx, view.extent[2] + dy, view.extent[3] + dy];
@@ -511,6 +556,9 @@ canvas.addEventListener("wheel", (e) => {
 // Start: ?url=...&view=... override the first source.
 await init();
 const q = new URLSearchParams(location.search);
+// ?height=, ?tilt= and ?azi= set the tilted view
+for (const id of ["height", "tilt", "azi"]) if (q.get(id) !== null && Number.isFinite(+q.get(id))) $(id).value = q.get(id);
+perspText();
 const first = q.get("url") ? { url: q.get("url"), view: q.get("view") || "globe" } : SOURCES[0];
 if (q.get("url")) $("source").selectedIndex = SOURCES.length - 1;
 $("url").value = first.url;
