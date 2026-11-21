@@ -1,23 +1,28 @@
 // The view plan page: for the view on the canvas, which chunks of which
 // level a source is asked for (rwarp::view in wasm), drawn over the map
-// and counted beside the one-box rule. A COG source is then fetched and
-// drawn by its plan; a Zarr source is planned from its metadata.
-import init, { Cog, Transform, planView } from "./pkg/wxy_web.js";
+// and counted beside the one-box rule. The source, a COG or a Zarr, is
+// then fetched and drawn by its plan.
+import init, { Cog, Transform, Zarr, planView } from "./pkg/wxy_web.js";
 import { openZarr, flatLevels } from "./zarrmeta.js";
 
 const FIXTURES = "https://raw.githubusercontent.com/wxylib/fixtures/main/";
 const GHRSST = "https://data.source.coop/ausantarctic/ghrsst-mur-v2/2024/01/15/" +
   "20240115090000-JPL-L4_GHRSST-SSTfnd-MUR-GLOB-v02.0-fv04.1_analysed_sst.tif";
+const LOOSE = new URLSearchParams(location.search).has("loose");
 const HERE = new URL("./data/zarr/", import.meta.url).href;
+// `plan: true` is a store of zarr.json files alone: planned, never fetched
 const SOURCES = [
-  { name: "A global 0.01 degree pyramid (Zarr metadata, 7 levels)", url: HERE + "mur-pyramid.zarr", view: "south" },
+  { name: "GHRSST MUR sea surface temperature, one day at 0.125 degree (Zarr, 4 levels, this site)",
+    url: HERE + "ghrsst-mur-20240115.zarr", view: "south" },
+  { name: "A global 0.01 degree pyramid (Zarr metadata, 7 levels)", url: HERE + "mur-pyramid.zarr", view: "south",
+    plan: true },
   { name: "The same grid with no overviews (Zarr metadata, 1 array)",
-    url: HERE + "mur-full-resolution.zarr/analysed_sst", view: "seam" },
+    url: HERE + "mur-full-resolution.zarr/analysed_sst", view: "seam", plan: true },
   { name: "GHRSST MUR sea surface temperature, one day (COG, source.coop)", url: GHRSST, view: "south" },
   { name: "World, 0.5 degree (COG, wxylib/fixtures)", url: FIXTURES + "cog/world-int16-deflate.tif", view: "globe" },
   { name: "Antarctic, 12 km, polar stereographic (COG, wxylib/fixtures)",
     url: FIXTURES + "cog/polar-f32-zstd-bigtiff.tif", view: "globe" },
-  { name: "World, 0.5 degree (Zarr metadata, wxylib/fixtures)", url: FIXTURES + "zarr/world-int16-spatial.zarr/data", view: "globe" },
+  { name: "World, 0.5 degree (Zarr, wxylib/fixtures)", url: FIXTURES + "zarr/world-int16-spatial.zarr/data", view: "globe" },
   { name: "Your own COG or Zarr URL", url: "", view: "globe" },
 ];
 
@@ -43,13 +48,14 @@ const data = document.createElement("canvas");
 data.width = W; data.height = H;
 const dctx = data.getContext("2d");
 
-let source = null;      // { kind, url, crs, levels, flat, cog, bytesPerCell, geographic, note }
+let source = null;      // { kind, url, crs, levels, flat, cog, zarr, bytesPerCell, geographic, note }
 let view = null;        // { key, crs, extent: [xmin, xmax, ymin, ymax], lon0, lat0 }
 let toView = null;      // Transform: source CRS to view CRS (and back)
 let lonlat = null;      // Transform: EPSG:4326 to view CRS, for the graticule
 let plan = null, single = null, planMs = 0;
 let settled = new Set();          // the keys of the plan before this gesture
 let seq = 0, dataFor = null, fetched = null;
+const frame = new Float32Array(W * H);   // the first band as drawn, NaN where nothing is
 
 function say(text, error = false) {
   $("status").textContent = text;
@@ -66,7 +72,7 @@ async function getJson(url) {
   return r.json();
 }
 
-async function openSource(url) {
+async function openSource(url, planOnly = false) {
   url = url.trim();
   if (!url) { say("Paste the URL of a COG, or of a Zarr v3 array or multiscales group, served with CORS."); return false; }
   say("Opening " + url + " ...");
@@ -79,12 +85,29 @@ async function openSource(url) {
         levels.push({ gt: [...flat.slice(i, i + 6)], size: [flat[i + 6], flat[i + 7]], chunk: [flat[i + 8], flat[i + 9]] });
       }
       const info = JSON.parse(cog.info());
-      source = { kind: "cog", url, cog, crs: cog.sourceCrs(), levels, flat, bytesPerCell: null,
+      source = { kind: "cog", url, cog, zarr: null, crs: cog.sourceCrs(), levels, flat, bytesPerCell: null,
                  note: `COG, ${info.dtype}, ${levels.length} levels` };
     } else {
       const z = await openZarr(url, getJson);
-      source = { kind: "zarr", url, cog: null, crs: z.crs, levels: z.levels, flat: flatLevels(z.levels),
-                 bytesPerCell: z.bytesPerCell, note: `Zarr ${z.dtype}, ${z.kind}` };
+      const flat = flatLevels(z.levels);
+      // the arrays behind the levels, for fetch and draw; a store that
+      // cannot be read this way is still planned
+      let zarr = null, why = planOnly ? "metadata only" : "";
+      if (!planOnly) {
+        if (!z.lastTwo) why = "not drawn: y and x are not the last two dimensions";
+        else {
+          // warps read the plan's chunks and nothing else (?loose: what they ask for)
+          try { zarr = await Zarr.open(z.base, z.paths, flat, z.crs); zarr.readHeldOnly(!LOOSE); }
+          catch (e) { why = "not drawn: " + String(e.message || e); }
+        }
+      }
+      let dims = "";
+      if (zarr) {
+        const d = Object.entries(JSON.parse(zarr.info()).dims);
+        if (d.length > 2) dims = `, at index 0 of ${d.slice(0, -2).map(([n]) => n).join(", ")}`;
+      }
+      source = { kind: "zarr", url, cog: null, zarr, crs: z.crs, levels: z.levels, flat,
+                 bytesPerCell: z.bytesPerCell, opened: zarr ? zarr.stats() : null, note: `Zarr ${z.dtype}, ${z.kind}${dims}${why ? " (" + why + ")" : ""}` };
     }
   } catch (e) {
     source = null;
@@ -207,7 +230,8 @@ function report() {
   }
   if (settled.size) parts.push(`From the last view: fetch ${now.size - keep}, keep ${keep}, drop ${settled.size - keep}.`);
   if (fetched && dataFor === view.crs + view.extent.join()) {
-    parts.push(`Fetched: ${fetched.requests} range requests, ${mb(fetched.bytes)}, drawn in ${fetched.ms.toFixed(0)} ms.`);
+    parts.push(`Fetched: ${fetched.requests} ${source.cog ? "range requests" : "chunks"}, ${mb(fetched.bytes)}, ` +
+               `drawn in ${fetched.ms.toFixed(0)} ms.`);
   }
   say(parts.join(" "));
 }
@@ -360,17 +384,21 @@ function stretch(done) {
   return [v[Math.floor(v.length * 0.02)], v[Math.floor(v.length * 0.98)]];
 }
 
-// Fetch the plan's chunks in one batch, then warp each screen tile from
-// the level the plan gave it, nearest the centre first. A newer view
+// Fetch the plan's chunks in one batch (a COG's tiles in merged range
+// requests, a Zarr's chunks one request each, those already held left
+// out), then warp each screen tile from the level the plan gave it,
+// nearest the centre first. A newer view
 // (a larger `seq`) abandons this one.
 async function drawData() {
-  if (!source?.cog || !plan || !$("showData").checked) return;
+  const reader = source?.cog || source?.zarr;
+  if (!reader || !plan || !$("showData").checked) return;
   const mine = ++seq, crs = view.crs, e = view.extent.slice();
   const tile = +$("tile").value, t = plan.tiles;
-  const before = fetched?.total ?? { requests: 0, bytes: 0 };
+  const before = fetched?.total ??
+    (source.opened ? { requests: source.opened[0], bytes: source.opened[1] } : { requests: 0, bytes: 0 });
   const t0 = performance.now();
   try {
-    const stats = await source.cog.prefetch(plan.chunks);
+    const stats = await reader.prefetch(plan.chunks);
     if (mine !== seq) return;
     const tiles = [];
     for (let i = 0; i < t.length; i += 7) {
@@ -380,15 +408,17 @@ async function drawData() {
     }
     tiles.sort((a, b) => a.d - b.d);
     dctx.clearRect(0, 0, W, H);
+    frame.fill(NaN);
     dataFor = crs + e.join();
     const sx = (e[1] - e[0]) / W, sy = (e[3] - e[2]) / H, done = [];
     let range = null, last = stats;
     for (const d of tiles) {
       const ext = [e[0] + d.x * sx, e[0] + (d.x + d.w) * sx, e[3] - (d.y + d.h) * sy, e[3] - d.y * sy];
-      d.out = await source.cog.warpLevel(crs, ext, d.w, d.h, "bilinear", d.level);
+      d.out = await reader.warpLevel(crs, ext, d.w, d.h, "bilinear", d.level);
       if (mine !== seq) return;
       last = d.out;
       done.push(d);
+      for (let r = 0; r < d.h; r++) frame.set(d.out.values.subarray(r * d.w, (r + 1) * d.w), (d.y + r) * W + d.x);
       if (!range && done.length >= Math.min(8, tiles.length)) range = stretch(done);
       if (range) { paint(done.length === 8 ? done : [d], ...range); redraw(); }
     }
@@ -419,8 +449,8 @@ function changed(now = false) {
   }, now ? 0 : 250);
 }
 
-async function load(url, viewKey) {
-  if (!await openSource(url)) { plan = single = null; redraw(); return; }
+async function load(url, viewKey, planOnly = false) {
+  if (!await openSource(url, planOnly)) { plan = single = null; redraw(); return; }
   $("view").value = viewKey;
   setView(viewKey);
   if (toView) changed(true);
@@ -431,7 +461,7 @@ for (const [k, v] of Object.entries(VIEWS)) $("view").add(new Option(v.name, k))
 $("source").onchange = () => {
   const s = SOURCES[$("source").selectedIndex];
   $("url").value = s.url;
-  if (s.url) load(s.url, s.view); else { $("url").focus(); say("Paste the URL of a COG, or of a Zarr v3 array or multiscales group, served with CORS."); }
+  if (s.url) load(s.url, s.view, s.plan); else { $("url").focus(); say("Paste the URL of a COG, or of a Zarr v3 array or multiscales group, served with CORS."); }
 };
 $("go").onclick = () => load($("url").value, $("view").value);
 $("url").addEventListener("keydown", (e) => { if (e.key === "Enter") $("go").onclick(); });
@@ -488,4 +518,4 @@ await load(first.url, VIEWS[q.get("view")] ? q.get("view") : first.view);
 
 // for tests and the console
 window.viewPlan = { get plan() { return plan; }, get single() { return single; }, get view() { return view; },
-                    get source() { return source; }, get fetched() { return fetched; } };
+                    get source() { return source; }, get fetched() { return fetched; }, frame };

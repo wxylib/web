@@ -86,7 +86,7 @@
     <label class="check"><input type="checkbox" id="showTiles" checked> screen tiles by level</label>
     <label class="check"><input type="checkbox" id="showChunks" checked> planned chunks</label>
     <label class="check"><input type="checkbox" id="showSingle"> single-box chunks</label>
-    <label class="check"><input type="checkbox" id="showData" checked> fetch and draw (COG sources)</label>
+    <label class="check"><input type="checkbox" id="showData" checked> fetch and draw</label>
   </div>
 
   <canvas id="map" width="768" height="576"></canvas>
@@ -101,9 +101,10 @@
   <div id="status">Loading wasm...</div>
 
   <footer>The planner is <code>rwarp::view</code>, compiled to WebAssembly: no I/O and no rendering, so any viewer
-    can call it. A Zarr source is read for its metadata only (<code>zarr.json</code>: multiscales, the
-    <code>spatial:</code> and <code>proj:</code> attributes); a COG's plan is then fetched in merged range requests
-    and each screen tile warped by <code>wxy-warp</code> from the level its plan gave it.
+    can call it. A Zarr source is planned from its metadata (<code>zarr.json</code>: multiscales, the
+    <code>spatial:</code> and <code>proj:</code> attributes). The plan is then fetched, a COG's tiles in merged range
+    requests and a Zarr's chunks one request each (decoded by zarrs), and each screen tile warped by
+    <code>wxy-warp</code> from the level its plan gave it.
     CRS through proj4rs. Sources must be served with CORS.
     <a href="https://github.com/wxylib/web">wxylib/web</a>; <a href="index.html">all examples</a>.</footer>
 </main>

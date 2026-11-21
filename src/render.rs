@@ -1,6 +1,6 @@
 //! The warp behind the canvas, free of JavaScript so it tests natively.
 
-use wxy_domain::DataType;
+use wxy_domain::{DataType, Domain};
 use wxy_source::{ChunkSource, Values};
 use wxy_tiff::TiffDataset;
 use wxy_warp::{GridSpec, ResampleAlg, WarpOptions};
@@ -58,11 +58,11 @@ pub struct Rendered {
 
 /// The value standing for "nothing here" during the warp: the source's
 /// nodata, or one the data is unlikely to hold.
-fn fill(ds: &TiffDataset) -> f64 {
-    if let Some(nd) = ds.collection.fields[0].values.nodata {
+pub fn fill(nodata: Option<f64>, dtype: DataType) -> f64 {
+    if let Some(nd) = nodata.filter(|v| !v.is_nan()) {
         return nd;
     }
-    match ds.levels[0].dtype() {
+    match dtype {
         DataType::I8 => i8::MIN as f64,
         DataType::I16 => i16::MIN as f64,
         DataType::I32 => i32::MIN as f64,
@@ -87,10 +87,6 @@ pub async fn warp_level(
 ) -> Result<Rendered, String> {
     let e = |e: wxy_source::Error| e.to_string();
     let domains = &ds.collection.domains;
-    let opts = WarpOptions {
-        resampling: view.resampling,
-        ..WarpOptions::default()
-    };
     let widths: Vec<u64> = domains[1..]
         .iter()
         .map(|d| *d.shape().last().unwrap_or(&0))
@@ -98,20 +94,35 @@ pub async fn warp_level(
     let level = match level {
         Some(k) if k < ds.levels.len() => k,
         Some(k) => return Err(format!("no level {k}: the source has {}", ds.levels.len())),
-        None => wxy_warp::choose_overview(&domains[0], &widths, &view.grid, &opts)
+        None => wxy_warp::choose_overview(&domains[0], &widths, &view.grid, &options(view))
             .map_err(e)?
             .map_or(0, |k| k + 1),
     };
-    let nodata = fill(ds);
-    let buf = wxy_warp::warp(
-        &ds.levels[level],
-        &domains[level],
-        &view.grid,
-        &opts,
-        Some(nodata),
-    )
-    .await
-    .map_err(e)?;
+    let nodata = ds.collection.fields[0].values.nodata;
+    let mut out = warp_source(&ds.levels[level], &domains[level], view, nodata).await?;
+    out.level = level;
+    Ok(out)
+}
+
+fn options(view: &View) -> WarpOptions {
+    WarpOptions {
+        resampling: view.resampling,
+        ..WarpOptions::default()
+    }
+}
+
+/// Warp one chunk source, placed by `domain`, to the view: a level of a
+/// COG, or of a Zarr pyramid. `level` is left 0.
+pub async fn warp_source<S: ChunkSource + ?Sized>(
+    source: &S,
+    domain: &Domain,
+    view: &View,
+    nodata: Option<f64>,
+) -> Result<Rendered, String> {
+    let nodata = fill(nodata, source.dtype());
+    let buf = wxy_warp::warp(source, domain, &view.grid, &options(view), Some(nodata))
+        .await
+        .map_err(|e| e.to_string())?;
     let mut values = to_f32(buf.values);
     let nd = nodata as f32;
     for v in values.iter_mut() {
@@ -123,7 +134,7 @@ pub async fn warp_level(
     Ok(Rendered {
         bands: values.len() / plane.max(1),
         values,
-        level,
+        level: 0,
     })
 }
 

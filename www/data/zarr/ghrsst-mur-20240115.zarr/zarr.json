@@ -1,0 +1,74 @@
+{
+ "zarr_format": 3,
+ "node_type": "group",
+ "attributes": {
+  "multiscales": {
+   "layout": [
+    {
+     "asset": "0",
+     "transform": {
+      "scale": [
+       1.0,
+       1.0
+      ],
+      "translation": [
+       0.0,
+       0.0
+      ]
+     }
+    },
+    {
+     "asset": "1",
+     "transform": {
+      "scale": [
+       2.0,
+       2.0
+      ],
+      "translation": [
+       0.0,
+       0.0
+      ]
+     },
+     "derived_from": "0",
+     "resampling_method": "average"
+    },
+    {
+     "asset": "2",
+     "transform": {
+      "scale": [
+       4.0,
+       4.0
+      ],
+      "translation": [
+       0.0,
+       0.0
+      ]
+     },
+     "derived_from": "1",
+     "resampling_method": "average"
+    },
+    {
+     "asset": "3",
+     "transform": {
+      "scale": [
+       8.0,
+       8.0
+      ],
+      "translation": [
+       0.0,
+       0.0
+      ]
+     },
+     "derived_from": "2",
+     "resampling_method": "average"
+    }
+   ],
+   "resampling_method": "average"
+  },
+  "spatial:dimensions": [
+   "y",
+   "x"
+  ],
+  "proj:code": "EPSG:4326"
+ }
+}

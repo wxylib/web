@@ -19,6 +19,11 @@
 //! describes, and on a [`Cog`] `levels`, `planView`, `prefetch` and
 //! `warpLevel`, so a view is fetched and drawn by its plan.
 //!
+//! A Zarr source is a [`Zarr`]: `Zarr.open(base, arrays, levels, crs)`
+//! over the levels the page read from the store's metadata, then
+//! `prefetch` and `warpLevel` as on a [`Cog`] ([`zarr`]; `wxy-zarr` and
+//! zarrs decode the chunks).
+//!
 //! [`render`] holds the part that does not touch JavaScript, so it is
 //! tested natively against the wxylib/fixtures COGs.
 
@@ -26,9 +31,12 @@ pub mod explore;
 pub mod plan;
 pub mod ranges;
 pub mod render;
+pub mod zarr;
 
 #[cfg(target_arch = "wasm32")]
 mod fetch;
+#[cfg(target_arch = "wasm32")]
+mod zarrfetch;
 
 #[cfg(target_arch = "wasm32")]
 mod bindings {
@@ -341,6 +349,127 @@ mod bindings {
                 set("bands", out.bands.into())?;
                 set("level", out.level.into())?;
                 let (requests, bytes) = reader.stats();
+                set("requests", (requests as f64).into())?;
+                set("bytes", (bytes as f64).into())?;
+                Ok(obj.into())
+            })
+        }
+    }
+
+    /// An opened Zarr source: the arrays of a multiscales group, or one
+    /// array.
+    #[wasm_bindgen]
+    pub struct Zarr {
+        levels: Rc<crate::zarr::ZarrLevels>,
+        store: Arc<crate::zarrfetch::FetchStore>,
+    }
+
+    #[wasm_bindgen]
+    impl Zarr {
+        /// Open the arrays at `paths` (one a level, finest first) under
+        /// the hierarchy at `base`. `levels` (ten numbers each, as
+        /// `planView` takes them) and `crs` place them: what the page
+        /// read from the store's metadata and planned with. The server
+        /// must allow CORS.
+        pub async fn open(
+            base: String,
+            paths: Vec<String>,
+            levels: Vec<f64>,
+            crs: String,
+        ) -> Result<Zarr, JsError> {
+            let err = |e: String| JsError::new(&e);
+            let levels = plan::levels_from_flat(&levels).map_err(err)?;
+            let store = Arc::new(crate::zarrfetch::FetchStore::new(&base));
+            let mut datasets = Vec::new();
+            for p in &paths {
+                let ds = wxy_zarr::open(store.clone(), p)
+                    .await
+                    .map_err(|e| JsError::new(&format!("{p}: {e}")))?;
+                datasets.push(ds);
+            }
+            let levels = crate::zarr::ZarrLevels::new(datasets, &levels, &crs).map_err(err)?;
+            Ok(Zarr {
+                levels: Rc::new(levels),
+                store,
+            })
+        }
+
+        /// The source as JSON: type, nodata, the number of levels and
+        /// the first array's dims.
+        pub fn info(&self) -> String {
+            self.levels.info()
+        }
+
+        /// With `on`, warps read the chunks `prefetch` brought in and
+        /// take every other chunk as empty, fetching nothing: a view
+        /// drawn from its plan's chunks alone.
+        #[wasm_bindgen(js_name = readHeldOnly)]
+        pub fn read_held_only(&self, on: bool) {
+            self.levels.read_held_only(on);
+        }
+
+        /// The store's totals so far, as `[requests, bytes]`.
+        pub fn stats(&self) -> Vec<f64> {
+            let (requests, bytes) = self.store.stats();
+            vec![requests as f64, bytes as f64]
+        }
+
+        /// Fetch and decode chunks (`level, col, row` triples, as a
+        /// plan's `chunks`), six requests at a time. Resolves to
+        /// `{ requests, bytes, fresh }`: the store's totals so far and
+        /// how many of these chunks were not already held. Warps that
+        /// follow read them from memory.
+        pub fn prefetch(&self, chunks: Vec<u32>) -> js_sys::Promise {
+            let levels = self.levels.clone();
+            let store = self.store.clone();
+            wasm_bindgen_futures::future_to_promise(async move {
+                let fresh = levels
+                    .prefetch(&chunks)
+                    .await
+                    .map_err(|e| JsValue::from(JsError::new(&e)))?;
+                let obj = js_sys::Object::new();
+                let set = |k: &str, v: JsValue| js_sys::Reflect::set(&obj, &k.into(), &v);
+                let (requests, bytes) = store.stats();
+                set("requests", (requests as f64).into())?;
+                set("bytes", (bytes as f64).into())?;
+                set("fresh", (fresh as f64).into())?;
+                Ok(obj.into())
+            })
+        }
+
+        /// Warp level `level` to a `width` by `height` grid in `crs`
+        /// covering `extent` (`[xmin, xmax, ymin, ymax]`): how a screen
+        /// tile is drawn from the level its plan gave it. Resolves as
+        /// `Cog.warpLevel` does.
+        #[wasm_bindgen(js_name = warpLevel)]
+        pub fn warp_level(
+            &self,
+            crs: String,
+            extent: Vec<f64>,
+            width: usize,
+            height: usize,
+            resampling: String,
+            level: usize,
+        ) -> js_sys::Promise {
+            let levels = self.levels.clone();
+            let store = self.store.clone();
+            wasm_bindgen_futures::future_to_promise(async move {
+                let err = |e: String| JsValue::from(JsError::new(&e));
+                let view = View::new(&crs, &extent, width, height, &resampling).map_err(err)?;
+                let (Some(plane), Some(domain)) =
+                    (levels.planes.get(level), levels.domains.get(level))
+                else {
+                    return Err(err(format!("no level {level}")));
+                };
+                let out = render::warp_source(plane, domain, &view, levels.nodata)
+                    .await
+                    .map_err(err)?;
+                let obj = js_sys::Object::new();
+                let set = |k: &str, v: JsValue| js_sys::Reflect::set(&obj, &k.into(), &v);
+                set("values", js_sys::Float32Array::from(&out.values[..]).into())?;
+                set("bands", out.bands.into())?;
+                set("level", level.into())?;
+                let (requests, bytes) = store.stats();
                 set("requests", (requests as f64).into())?;
                 set("bytes", (bytes as f64).into())?;
                 Ok(obj.into())

@@ -52,6 +52,7 @@ export function levelOf(meta, inherited = {}, gt = null) {
   gt = gt || geotransform(attrs);
   if (!gt) throw new Error("no affine spatial:transform on the array or its group");
   return { gt, size: [shape[ix], shape[iy]], chunk: [chunk[ix], chunk[iy]],
+           lastTwo: iy === shape.length - 2 && ix === shape.length - 1,
            bytesPerCell: BYTES[meta.data_type] ?? null, crs: crsOf(attrs), dtype: String(meta.data_type) };
 }
 
@@ -61,7 +62,9 @@ function scaled(gt, sx, sy) {
 }
 
 // Open the store at `url` with `getJson(url)` (resolves to parsed JSON,
-// or throws). Resolves to { crs, levels, kind, bytesPerCell, dtype }.
+// or throws). Resolves to { crs, levels, kind, bytesPerCell, dtype, base,
+// paths, lastTwo }: `paths` are the arrays, one a level, under `base`;
+// `lastTwo` is whether y and x are every array's last two dimensions.
 export async function openZarr(url, getJson) {
   const base = url.replace(/\/+$/, "").replace(/\/zarr\.json$/, "");
   const root = await getJson(base + "/zarr.json");
@@ -74,7 +77,8 @@ export async function openZarr(url, getJson) {
       try { up = (await getJson(base.replace(/\/[^/]+$/, "") + "/zarr.json")).attributes || {}; } catch { up = {}; }
     }
     const l = levelOf(root, up);
-    return finish([l], "one array, no overviews");
+    const cut = base.lastIndexOf("/");
+    return finish([l], "one array, no overviews", base.slice(0, cut), [base.slice(cut + 1)]);
   }
   const layout = attrs.multiscales?.layout;
   if (!Array.isArray(layout) || !layout.length) {
@@ -92,14 +96,15 @@ export async function openZarr(url, getJson) {
     }
     levels.push(levelOf(metas[i], own, gt));
   }
-  return finish(levels, `multiscales, ${levels.length} levels`);
+  return finish(levels, `multiscales, ${levels.length} levels`, base, layout.map((item) => String(item.asset)));
 }
 
-function finish(levels, kind) {
+function finish(levels, kind, base, paths) {
   const crs = levels.map((l) => l.crs).find(Boolean);
   if (!crs) throw new Error("no proj:code or proj:proj4 on the array or its group");
   return { crs, levels: levels.map(({ gt, size, chunk }) => ({ gt, size, chunk })), kind,
-           bytesPerCell: levels[0].bytesPerCell, dtype: levels[0].dtype };
+           bytesPerCell: levels[0].bytesPerCell, dtype: levels[0].dtype, base, paths,
+           lastTwo: levels.every((l) => l.lastTwo) };
 }
 
 // Ten numbers a level, as the wasm planner takes them.

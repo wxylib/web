@@ -1,0 +1,65 @@
+{
+  "shape": [
+    360,
+    720
+  ],
+  "data_type": "int16",
+  "chunk_grid": {
+    "name": "regular",
+    "configuration": {
+      "chunk_shape": [
+        180,
+        180
+      ]
+    }
+  },
+  "chunk_key_encoding": {
+    "name": "default",
+    "configuration": {
+      "separator": "/"
+    }
+  },
+  "fill_value": -32768,
+  "codecs": [
+    {
+      "name": "bytes",
+      "configuration": {
+        "endian": "little"
+      }
+    },
+    {
+      "name": "zstd",
+      "configuration": {
+        "level": 9,
+        "checksum": false
+      }
+    }
+  ],
+  "attributes": {
+    "spatial:dimensions": [
+      "y",
+      "x"
+    ],
+    "spatial:transform": [
+      0.5,
+      0.0,
+      -180.0,
+      0.0,
+      -0.5,
+      90.0
+    ],
+    "spatial:shape": [
+      360,
+      720
+    ],
+    "proj:code": "EPSG:4326",
+    "_FillValue": -32768
+  },
+  "dimension_names": [
+    "y",
+    "x"
+  ],
+  "zarr_format": 3,
+  "node_type": "array",
+  "storage_transformers": []
+}
