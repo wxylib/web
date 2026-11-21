@@ -16,6 +16,8 @@
   h1 { font-size: 20px; margin: 4px 0 2px; }
   p.lede { margin: 0 0 12px; color: var(--muted); }
   .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 8px; }
+  .controls[hidden] { display: none; }
+  input[type=range] { padding: 0; }
   label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
   label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--fg); font-size: 13px; }
   select, input, button { font: inherit; color: var(--fg); background: var(--panel);
@@ -76,6 +78,22 @@
         <option value="12">12 chunks</option>
         <option value="6">6 chunks</option>
       </select>
+    </label>
+  </div>
+  <div class="controls" id="persp" hidden>
+    <label>Height
+      <select id="height">
+        <option value="800000">800 km</option>
+        <option value="2500000" selected>2,500 km</option>
+        <option value="10000000">10,000 km</option>
+        <option value="35786000">35,786 km (geostationary)</option>
+      </select>
+    </label>
+    <label>Tilt <span id="tiltText"></span>
+      <input type="range" id="tilt" min="0" max="70" step="1" value="40">
+    </label>
+    <label>Heading <span id="aziText"></span>
+      <input type="range" id="azi" min="-180" max="180" step="1" value="0">
     </label>
   </div>
   <div class="url">
