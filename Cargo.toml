@@ -1,6 +1,6 @@
 [package]
 name = "wxy-web"
-description = "wxylib in the browser: open a COG over HTTP with wxy-tiff and warp it with wxy-warp, compiled to wasm."
+description = "wxylib in the browser: open a COG or a Zarr over HTTP with wxy-tiff and wxy-zarr and warp it with wxy-warp, compiled to wasm."
 version = "0.0.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -13,12 +13,16 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # wxylib/core pinned by git rev; bump together.
-wxy-domain = { git = "https://github.com/wxylib/core", rev = "15bab9ed7ff6549d36239d08ea51b58c35374236" }
-wxy-source = { git = "https://github.com/wxylib/core", rev = "15bab9ed7ff6549d36239d08ea51b58c35374236" }
-wxy-tiff = { git = "https://github.com/wxylib/core", rev = "15bab9ed7ff6549d36239d08ea51b58c35374236" }
-wxy-warp = { git = "https://github.com/wxylib/core", rev = "15bab9ed7ff6549d36239d08ea51b58c35374236" }
+wxy-domain = { git = "https://github.com/wxylib/core", rev = "a274ef4c3620eaa0dbdeaf4d230150c564ce3b3d" }
+wxy-source = { git = "https://github.com/wxylib/core", rev = "a274ef4c3620eaa0dbdeaf4d230150c564ce3b3d" }
+wxy-tiff = { git = "https://github.com/wxylib/core", rev = "a274ef4c3620eaa0dbdeaf4d230150c564ce3b3d" }
+wxy-warp = { git = "https://github.com/wxylib/core", rev = "a274ef4c3620eaa0dbdeaf4d230150c564ce3b3d" }
+wxy-zarr = { git = "https://github.com/wxylib/core", rev = "a274ef4c3620eaa0dbdeaf4d230150c564ce3b3d" }
 # the VRT model and planner, for the VRT discovery page
-vrt-model = { git = "https://github.com/wxylib/core", rev = "15bab9ed7ff6549d36239d08ea51b58c35374236" }
+vrt-model = { git = "https://github.com/wxylib/core", rev = "a274ef4c3620eaa0dbdeaf4d230150c564ce3b3d" }
+# the storage trait wxy-zarr opens arrays through (zarrs), for a store
+# over fetch
+zarrs_storage = { version = "0.4.5", features = ["async"] }
 serde_json = "1"
 # the same rwarp wxy-warp pins, for CRS transforms of the source outline
 # and the view plan

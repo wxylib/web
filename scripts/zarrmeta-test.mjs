@@ -17,6 +17,15 @@ assert.deepEqual(pyr.levels[6].size, [563, 282]);
 assert.ok(Math.abs(pyr.levels[6].gt[1] - 0.64) < 1e-12);
 assert.equal(pyr.bytesPerCell, 2);
 assert.equal(flatLevels(pyr.levels).length, 70);
+assert.equal(pyr.base, path.join(root, "mur-pyramid.zarr"));
+assert.deepEqual(pyr.paths, ["0", "1", "2", "3", "4", "5", "6"]);
+assert.equal(pyr.lastTwo, true);
+
+// the pyramid with data: four levels in chunks of 180
+const sst = await openZarr(path.join(root, "ghrsst-mur-20240115.zarr"), getJson);
+assert.equal(sst.levels.length, 4);
+assert.deepEqual(sst.levels[0], { gt: [-180, 0.125, 0, 90, 0, -0.125], size: [2880, 1440], chunk: [180, 180] });
+assert.deepEqual(sst.levels[3].size, [360, 180]);
 
 // a trailing slash and a zarr.json URL are the same store
 const again = await openZarr(path.join(root, "mur-pyramid.zarr") + "/zarr.json", getJson);
@@ -24,6 +33,8 @@ assert.deepEqual(again.levels, pyr.levels);
 
 const flat = await openZarr(path.join(root, "mur-full-resolution.zarr", "analysed_sst"), getJson);
 assert.equal(flat.levels.length, 1);
+assert.equal(flat.base, path.join(root, "mur-full-resolution.zarr"));
+assert.deepEqual(flat.paths, ["analysed_sst"]);
 assert.deepEqual(flat.levels[0].size, [36000, 18000]);
 await assert.rejects(openZarr(path.join(root, "mur-full-resolution.zarr"), getJson), /without multiscales/);
 

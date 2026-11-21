@@ -47,12 +47,51 @@ range requests. One box at one level asks for 54 tiles of overview 2,
 a 40 degree view of a pyramid of that shape needs 6 chunks by the plan
 and 144 by one box, which spans the whole width of the grid.
 
-- A Zarr source is read for its metadata only (`www/zarrmeta.js`): a
+![The globe from a Zarr pyramid: 50 chunks of three levels, level 0 in
+the middle and coarser levels toward the limb](docs/img/zarr-pyramid-globe.jpg)
+
+The same day as a small Zarr pyramid, on the globe: 50 chunks of three
+levels, where one box at level 0 asks for 96.
+
+- A Zarr source is planned from its metadata (`www/zarrmeta.js`): a
   Zarr v3 array with the GeoZarr `spatial:` and `proj:` attributes, or a
   group with `multiscales`. Two stores of nothing but `zarr.json` files
   (`www/data/zarr`, written by `scripts/zarr_pyramid_metadata.py`) have
-  the shape of GHRSST MUR with and without overviews. Zarr chunks are
-  not fetched or drawn yet.
+  the shape of GHRSST MUR with and without overviews; they are planned
+  and never fetched.
+- A Zarr source with chunks is then fetched and drawn by its plan.
+  `Zarr.open` opens each level's array with `wxy-zarr` (zarrs and its
+  codecs, in wasm) over a store that is plain `fetch` (`src/zarrfetch.rs`);
+  `zarr.prefetch(chunks)` fetches and decodes the plan's chunks, six
+  requests at a time, and keeps them decoded, so a chunk shared by
+  several screen tiles is decoded once and a pan fetches only what is
+  new; `zarr.warpLevel` warps each screen tile from its level
+  (`src/zarr.rs`). The warp reads the plan's chunks and nothing else: a
+  chunk the plan did not name reads as empty and is not fetched, so the
+  plan decides the requests. An array with dims before y and x (time,
+  band) is drawn at index 0 of each.
+- The store with data is `www/data/zarr/ghrsst-mur-20240115.zarr`: one
+  day of GHRSST MUR at 0.125 degree with three levels of 2 x 2 averages,
+  in chunks of 180 x 180 (6 MB; a `wxy warp` of the COG, then
+  `scripts/zarr_pyramid_data.py`). On six views of it (both poles, the
+  globe, across 180, the world, Web Mercator) the picture from the
+  plan's chunks alone is the same, value for value, as the picture when
+  the warp may fetch whatever its own source windows ask for, and the
+  plan fetches less where a view bends or wraps:
+
+  | View | Plan's chunks | Fetched by plan | Fetched by the warp's windows |
+  |---|---|---|---|
+  | Globe (orthographic) | 50 | 50 (2.25 MB) | 102 (4.53 MB) |
+  | Longitude / latitude across 180 | 6 | 6 (0.34 MB) | 48 (2.22 MB) |
+  | South polar stereographic | 52 | 50 (1.90 MB) | 50 (1.90 MB) |
+  | North polar stereographic | 52 | 52 (0.96 MB) | 56 (1.17 MB) |
+  | Longitude / latitude, whole world | 32 | 32 (1.14 MB) | 32 (1.14 MB) |
+  | Web Mercator | 64 | 62 (1.33 MB) | 62 (1.33 MB) |
+
+  (A chunk of nothing but land or ice is not stored, so a few planned
+  chunks cost a 404 and no bytes.) The page keeps a coarse chunk in the
+  plan when finer planned chunks cover it (`drop_covered` off), because
+  it draws each screen tile from the tile's own level.
 - A COG source is fetched and drawn by its plan: `cog.prefetch(chunks)`
   reads the plan's tiles in merged range requests, then each screen tile
   is warped by `wxy-warp` from the level its plan gave it
@@ -592,9 +631,10 @@ wxylib/core is pinned by git rev in `Cargo.toml`; bump it there.
 
 - The warp runs on the page's thread. Moving it to a worker keeps the
   page responsive on big views.
-- Zarr: `wxy-zarr` does not build for wasm until `ChunkSource` drops its
-  `Send`/`Sync` bound there (design doc 03, section 5). Virtual stores
-  (Icechunk) are further off.
+- Zarr: a sharded array is planned and fetched by whole shards, not by
+  the chunks inside them; one index (0) of the dims before y and x;
+  Zarr v2 metadata is not read by the page. Virtual stores (Icechunk)
+  are further off.
 - One source band set, one view; no tile pyramid, and the vector page is
   separate from the raster ones (no vectors over a warped COG yet).
 

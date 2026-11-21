@@ -31,7 +31,10 @@ impl Controls {
         if self.quality.is_finite() && self.quality > 0.0 {
             o = o.with_quality(self.quality);
         }
-        o.with_max_chunks((self.max_chunks > 0).then_some(self.max_chunks))
+        // The page draws each screen tile from its own level, so a coarse
+        // chunk stays in the plan when finer planned chunks cover it.
+        o.with_drop_covered(false)
+            .with_max_chunks((self.max_chunks > 0).then_some(self.max_chunks))
     }
 }
 
@@ -206,8 +209,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(src.period, Some(360.0));
-        assert_eq!((p.chunks.len(), s.chunks.len()), (36, 216));
-        assert!(s.cells(&src) > 6 * p.cells(&src));
+        // 36 with covered coarse chunks dropped, which this page keeps
+        assert_eq!((p.chunks.len(), s.chunks.len()), (45, 216));
+        assert!(s.cells(&src) > 5 * p.cells(&src));
         let tight = Controls {
             max_chunks: 12,
             ..c
