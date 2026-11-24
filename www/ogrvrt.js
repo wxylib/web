@@ -731,13 +731,47 @@ async function readFlatGeobuf(src, ctx, want) {
   };
 }
 
+// GeoParquet "geo" metadata CRS: an absent key means OGC:CRS84, an
+// explicit null means unknown.
+function geoCRS(gmeta) {
+  if (!("crs" in gmeta)) return LONLAT;
+  return gmeta.crs === null ? null : crsFrom(gmeta.crs);
+}
+
+// Native Parquet GEOMETRY/GEOGRAPHY CRS (Parquet Geospatial.md): empty
+// means OGC:CRS84; "projjson:<key>" names a footer key holding PROJJSON;
+// "srid:0" means unknown, another "srid:<n>" is taken as EPSG:<n> (the
+// common engine convention, not a rule of the format); anything else is
+// AUTH:CODE or a CRS definition, read as given.
+export function nativeCRS(element, kv) {
+  const c = element && element.logical_type ? element.logical_type.crs : undefined;
+  if (c === undefined || c === null || c === "") return LONLAT;
+  const s = String(c).trim();
+  let m = /^projjson:(.+)$/i.exec(s);
+  if (m) {
+    if (!(m[1] in kv)) throw new Error(`the CRS names footer key ${m[1]}, which the file does not have`);
+    return crsFrom(JSON.parse(kv[m[1]]));
+  }
+  m = /^srid:(\d+)$/i.exec(s);
+  if (m) return +m[1] === 0 ? null : crsFrom(`EPSG:${m[1]}`);
+  return s.startsWith("{") ? crsFrom(JSON.parse(s)) : crsFrom(s);
+}
+
 async function readParquet(src, ctx) {
   const hp = ctx.libs.hyparquet;
   const file = hp.cachedAsyncBuffer(await hp.asyncBufferFromUrl({ url: src.url, fetch: ctx.fetch }));
   const metadata = await hp.parquetMetadataAsync(file);
   const kv = Object.fromEntries((metadata.key_value_metadata || []).map((x) => [x.key, x.value]));
   const geo = kv.geo ? JSON.parse(kv.geo) : null;
-  const gcol = geo ? geo.primary_column : null;
+  // The geometry column: GeoParquet's primary column where the file has
+  // "geo" metadata, otherwise the first column of the native Parquet
+  // GEOMETRY or GEOGRAPHY type (Parquet 2.11 geospatial types, which
+  // GeoParquet 2.0 builds on; such a file need not carry "geo" metadata).
+  const native = hp.parquetSchema
+    ? hp.parquetSchema(metadata).children.map((c) => c.element)
+      .find((e) => e.logical_type && /^(GEOMETRY|GEOGRAPHY)$/.test(e.logical_type.type))
+    : null;
+  const gcol = geo ? geo.primary_column : native ? native.name : null;
   const gmeta = geo && gcol ? geo.columns[gcol] : null;
   const total = Number(metadata.num_rows);
   const rowEnd = Math.min(total, ctx.limit);
@@ -768,7 +802,7 @@ async function readParquet(src, ctx) {
     name: baseName(src.url),
     fields: (schema.length ? schema : names.map((name) => ({ name }))).filter((e) => e.name !== gcol)
       .map((e) => ({ name: e.name, type: e.type ? TYPE(e) : "String" })),
-    rows, srs: gcol ? (gmeta && gmeta.crs ? crsFrom(gmeta.crs) : LONLAT) : null,
+    rows, srs: gcol ? (gmeta ? geoCRS(gmeta) : nativeCRS(native, kv)) : null,
     geometry: !!gcol, truncated: rowEnd < total, total,
   };
 }
