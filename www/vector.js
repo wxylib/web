@@ -47,7 +47,7 @@ LIMIT 2000`,
   },
   url: {
     label: "A GeoParquet file at a URL",
-    hint: "Any GeoParquet (or Parquet with a WKB column called geometry) served with CORS and range requests. " +
+    hint: "Any GeoParquet 1.x or 2.0 (or Parquet with a WKB or native GEOMETRY column called geometry) served with CORS and range requests. " +
       "Several URLs separated by spaces, or a numbered set such as part_{00000..00123}.parquet, are one source: " +
       "the first query reads every footer for the files' bboxes, later ones open only the files the view meets.",
     sql: `SELECT *
@@ -264,14 +264,17 @@ function expandUrls(text) {
   return out;
 }
 
-// Each file's bbox, from the GeoParquet "geo" metadata in its footer. The
-// first query over a set reads every footer once (the STAC catalog does
-// this job for Overture); the bboxes are then kept in the browser, so
-// later queries open only the files the view meets. A file without a bbox
-// is always opened.
+// Each file's bbox, from its footer: the GeoParquet "geo" metadata where
+// the file has it (GeoParquet 1.x, and 2.0 files that keep it), otherwise
+// the native Parquet GEOMETRY/GEOGRAPHY column statistics (Parquet 2.11
+// geospatial types, which GeoParquet 2.0 builds on; such a file need not
+// carry "geo" metadata at all). The first query over a set reads every
+// footer once (the STAC catalog does this job for Overture); the bboxes
+// are then kept in the browser, so later queries open only the files the
+// view meets. A file without a bbox is always opened.
 const indexes = new Map();
 function urlBboxes(urls) {
-  const key = `wxy-geo:${urls.length}:${urls[0]}:${urls[urls.length - 1]}`;
+  const key = `wxy-geo2:${urls.length}:${urls[0]}:${urls[urls.length - 1]}`;
   if (!indexes.has(key)) {
     const job = (async () => {
       try {
@@ -280,9 +283,10 @@ function urlBboxes(urls) {
       } catch (e) { /* storage blocked */ }
       say(`Reading ${urls.length} file footers for their bboxes (once per set)...`);
       const bbox = new Map();
+      const list = (us) => `[${us.map(sqlString).join(", ")}]`;
       try {
         const t = await conn.query(`SELECT file_name, decode(value) AS geo
-          FROM parquet_kv_metadata([${urls.map(sqlString).join(", ")}]) WHERE decode(key) = 'geo'`);
+          FROM parquet_kv_metadata(${list(urls)}) WHERE decode(key) = 'geo'`);
         for (const row of t.toArray()) {
           const geo = JSON.parse(row.geo);
           const b = geo.columns?.[geo.primary_column]?.bbox;
@@ -291,8 +295,26 @@ function urlBboxes(urls) {
           }
         }
       } catch (e) {
-        console.warn("no file bboxes, opening every file:", e);
-        return urls.map((url) => ({ url, bbox: null }));
+        console.warn("no geo metadata read:", e);
+      }
+      // Native geospatial statistics, for the files the geo metadata did
+      // not cover: the union over row groups (and over geometry columns,
+      // which can only widen the box, so no file is wrongly skipped).
+      const rest = urls.filter((u) => !bbox.has(u));
+      if (rest.length) {
+        try {
+          const t = await conn.query(`SELECT file_name,
+              min(geo_bbox.xmin) AS xmin, min(geo_bbox.ymin) AS ymin,
+              max(geo_bbox.xmax) AS xmax, max(geo_bbox.ymax) AS ymax
+            FROM parquet_metadata(${list(rest)})
+            WHERE geo_bbox.xmin IS NOT NULL GROUP BY file_name`);
+          for (const row of t.toArray()) {
+            const b = [row.xmin, row.ymin, row.xmax, row.ymax].map(Number);
+            if (b.every(Number.isFinite)) bbox.set(row.file_name, b);
+          }
+        } catch (e) {
+          console.warn("no native geospatial statistics read:", e);
+        }
       }
       const files = urls.map((url) => ({ url, bbox: bbox.get(url) || null }));
       try { localStorage.setItem(key, JSON.stringify(files)); } catch (e) { /* storage full or blocked */ }

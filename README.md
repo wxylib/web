@@ -199,9 +199,13 @@ and `?url=...` or `?sql=...` open one directly.
 The URL box also takes a set of files: several URLs separated by spaces,
 or a numbered range such as `ftw_global_{00000..00123}.parquet` (zero
 padded to the first number's width). The first query over a set reads
-every footer once for each file's bbox (the GeoParquet `geo` metadata),
-kept in the browser after that, so later queries open only the files the
-view meets, the job the STAC catalog does for Overture.
+every footer once for each file's bbox, kept in the browser after that,
+so later queries open only the files the view meets, the job the STAC
+catalog does for Overture. The bbox comes from the GeoParquet `geo`
+metadata where a file has it, otherwise from the statistics of a native
+Parquet `GEOMETRY` or `GEOGRAPHY` column (the Parquet 2.11 geospatial
+types that GeoParquet 2.0 rests on; such a file need not carry `geo`
+metadata, and DuckDB reads its geometry as WKB).
 
 Choosing a preset moves the map to a place with its data (central
 Hobart for Overture), the files' extents are drawn as dashed boxes once
@@ -263,6 +267,13 @@ GeoJSON on GitHub, a `SrcSQL` filter, an FID field, three renamed fields),
 `union.vrt` (a union of a layer and a warped layer), `countries-parquet.vrt`
 (GeoParquet with a `SrcRegion`) and `uscounties.vrt` (FlatGeobuf read by
 the view). `scripts/vrt_examples.py` writes their small sources.
+`countries-native.parquet` is the same table with a native Parquet
+`GEOMETRY` column and no `geo` metadata, as a GeoParquet 2.0 writer may
+leave it (`scripts/native_parquet.py` writes it); the test reads it in
+place of `countries.parquet` and expects
+the same features. The geometry column is then the first native one, and
+its CRS follows the Parquet rules (none means OGC:CRS84, `srid:0` means
+unknown, `projjson:<key>` names a footer key).
 
 Each example is checked against GDAL feature by feature (fields, values,
 FIDs, geometry): `scripts/vrt_oracle.py` reads them with GDAL 3.12 (the

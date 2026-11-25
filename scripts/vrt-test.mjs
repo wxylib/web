@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import {
   parseVRT, readLayer, parseWhere, evaluate, parseWKT, intersects, parseSelect, crsFrom, styleFrom, toLonLat, layerName,
+  nativeCRS,
 } from "../www/ogrvrt.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -130,6 +131,32 @@ await test("CRS input", () => {
 await test("OGR style strings", () => {
   assert.deepEqual(styleFrom("PEN(c:#FF0000,w:2px,p:\"4px 2px\");BRUSH(fc:#00FF0080)"),
     { color: "#FF0000", opacity: 1, weight: 2, dashArray: "4 2", fillColor: "#00FF00", fillOpacity: 128 / 255 });
+});
+
+await test("native Parquet geometry CRS", () => {
+  const el = (crs) => ({ logical_type: { type: "GEOMETRY", crs } });
+  assert.equal(nativeCRS(el(undefined), {}).lonlat, true); // absent: OGC:CRS84
+  assert.equal(nativeCRS(el("OGC:CRS84"), {}).lonlat, true);
+  assert.equal(nativeCRS(el("EPSG:3031"), {}).label, "EPSG:3031");
+  assert.equal(nativeCRS(el("srid:0"), {}), null); // explicit unknown
+  assert.equal(nativeCRS(el("srid:3857"), {}).label, "EPSG:3857");
+  const kv = { crs3031: JSON.stringify({ type: "ProjectedCRS", name: "x", id: { authority: "EPSG", code: 3031 } }) };
+  assert.equal(nativeCRS(el("projjson:crs3031"), kv).label, "EPSG:3031");
+  assert.throws(() => nativeCRS(el("projjson:missing"), kv), /footer key missing/);
+});
+
+// GeoParquet 2.0 rests on the native Parquet GEOMETRY type; a file with
+// only that (no "geo" metadata) reads the same as the GeoParquet 1.x copy.
+await test("native GEOMETRY parquet without geo metadata", async () => {
+  const text = readFileSync(join(www, "data", "vrt", "countries-parquet.vrt"), "utf8");
+  const view = [100, -50, 180, 0];
+  const read = async (t) => readLayer(parseVRT(t, `${LOCAL}data/vrt/countries-parquet.vrt`).layers[0], { libs, view, cache: new Map() });
+  const a = await read(text);
+  const b = await read(text.replace("countries.parquet", "countries-native.parquet"));
+  assert.ok(a.features.length > 0);
+  assert.equal(b.srs.label, a.srs.label);
+  assert.deepEqual(b.features.map((f) => f.properties), a.features.map((f) => f.properties));
+  b.features.forEach((f, i) => sameCoords(f.geometry.coordinates, a.features[i].geometry.coordinates, 0, `feature ${i}`));
 });
 
 // Against GDAL
